@@ -156,3 +156,38 @@ def test_derive_players_sorts_string_rounds_numerically():
     players = derive_players(matches)
     by_name = players.set_index("player_name")
     assert by_name.loc["Christoffer Larsen", "starting_elo"] == 1860.0  # round "2" elo_pre, not "10"
+
+
+def test_derive_players_resolves_raw_mtgelo_names_to_canonical():
+    """derive_players should fold 'Last, First' raw mtgelo names back to canonical magic.gg form."""
+    decks = pd.DataFrame([
+        {"player_name": "Christoffer Larsen", "archetype_magicgg": "Izzet Prowess",
+         "mainboard": "", "sideboard": ""},
+        {"player_name": "Nathan Steuer", "archetype_magicgg": "Selesnya Landfall",
+         "mainboard": "", "sideboard": ""},
+    ])
+    matches = pd.DataFrame([
+        {"match_id": 1, "round": "4", "format": "standard", "table": 1,
+         "player_a_id": "wrr61zbv", "player_a_name": "Larsen, Christoffer",  # raw
+         "player_b_id": "zz14clya", "player_b_name": "Steuer, Nathan",       # raw
+         "result": "W", "game_score": "2-1",
+         "player_a_elo_pre": 1845.0, "player_a_elo_post": 1860.0, "player_a_elo_delta": 15.0,
+         "player_b_elo_pre": 1910.0, "player_b_elo_post": 1895.0, "player_b_elo_delta": -15.0},
+    ])
+    players = derive_players(matches, canonical_names=decks["player_name"].tolist())
+    names = sorted(players["player_name"])
+    assert names == ["Christoffer Larsen", "Nathan Steuer"]
+
+
+def test_derive_players_passes_through_canonical_names_without_resolver():
+    """Calling derive_players without canonical_names leaves names unchanged."""
+    matches = pd.DataFrame([
+        {"match_id": 1, "round": "1", "format": "draft", "table": 1,
+         "player_a_id": "wrr61zbv", "player_a_name": "Christoffer Larsen",
+         "player_b_id": "zz14clya", "player_b_name": "Nathan Steuer",
+         "result": "W", "game_score": "2-0",
+         "player_a_elo_pre": 1850.0, "player_a_elo_post": 1860.0, "player_a_elo_delta": 10.0,
+         "player_b_elo_pre": 1900.0, "player_b_elo_post": 1890.0, "player_b_elo_delta": -10.0},
+    ])
+    players = derive_players(matches)
+    assert sorted(players["player_name"]) == ["Christoffer Larsen", "Nathan Steuer"]

@@ -85,11 +85,19 @@ def build_matchups(
     ]].reset_index(drop=True)
 
 
-def derive_players(matches: pd.DataFrame) -> pd.DataFrame:
+def derive_players(
+    matches: pd.DataFrame,
+    canonical_names: list[str] | None = None,
+    overrides: dict[str, str] | None = None,
+) -> pd.DataFrame:
     """Per-player starting_elo: elo_pre in their earliest round.
 
-    Rounds are strings; sort numeric-where-possible, putting top-cut Q/S/F after swiss.
+    If canonical_names is provided, raw mtgelo names get resolved to canonical
+    magic.gg names; otherwise names pass through unchanged.
     """
+    if overrides is None:
+        overrides = {}
+
     a = matches[["round", "player_a_name", "player_a_elo_pre"]].rename(
         columns={"player_a_name": "player_name", "player_a_elo_pre": "elo_pre"})
     b = matches[["round", "player_b_name", "player_b_elo_pre"]].rename(
@@ -97,6 +105,13 @@ def derive_players(matches: pd.DataFrame) -> pd.DataFrame:
     long = pd.concat([a, b], ignore_index=True).dropna(subset=["elo_pre"])
     if long.empty:
         return pd.DataFrame(columns=["player_name", "starting_elo"])
+
+    if canonical_names is not None:
+        resolver = build_resolver(canonical_names, overrides)
+        long["player_name"] = long["player_name"].apply(resolver)
+        # Any names that didn't resolve become None; drop them silently — the
+        # build_matchups path already enforces resolution for matchups.csv.
+        long = long.dropna(subset=["player_name"])
 
     long["_sort"] = long["round"].apply(_round_sort_key)
     long_sorted = long.sort_values("_sort")
@@ -122,7 +137,7 @@ def main() -> None:
     matchups.to_csv(args.matchups_out, index=False)
     print(f"Wrote {len(matchups)} matchups to {args.matchups_out}")
 
-    players = derive_players(matches)
+    players = derive_players(matches, canonical_names=decks["player_name"].tolist(), overrides=overrides)
     players.to_csv(args.players_out, index=False)
     print(f"Wrote {len(players)} players to {args.players_out}")
 

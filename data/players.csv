@@ -11,7 +11,7 @@ Pietro Maria Oltolina,1674.43
 Yoshitaka Yamasaki,1739.9
 Kenneth Oswald,1799.15
 Javier Dominguez,2064.08
-"Astrand, David",1601.7
+David Åstrand,1601.7
 Pier Paolo Moro,1607.19
 Brian Coval,1970.78
 William Au,1688.38
@@ -20,8 +20,8 @@ Ryan Brozovich,1935.64
 Benji Leaf,1761.36
 Ben Zoz,1903.93
 Allen Norman,1818.98
-"Stange, Jonathan",1665.26
-"D'Souza, Kenith",1929.98
+Jonny Stange,1665.26
+Kenith Dsouza,1929.98
 Arne Huschenbeth,2229.0
 Gregorio Galeotti,1661.71
 Maxime Rayvich,1846.88
@@ -31,11 +31,11 @@ John Wager,1935.78
 Zevin Faust,2077.98
 Jean-Emmanuel Depraz,2118.36
 Elijah Herr,1923.53
-"Osterude, Nicholas",1826.26
+Nick Osterude,1826.26
 Mike Sigrist,1985.93
 Phillip Li,2035.41
 Charles Eliatamby,1972.42
-"Medeiros Merjam, Guilherme",1971.86
+Guilherme Merjam,1971.86
 Paul Green,2128.72
 Lucas Duchow,1878.42
 Mattia Rizzi,2016.47
@@ -43,13 +43,13 @@ Kellen Pastore,2087.21
 Terry Edwards,1785.04
 Akira Shibata,2066.82
 Hiroki Kageyama,1951.3
-"Kho, Sek-Un",1727.87
+Se̍k-un Khó͘,1727.87
 Justin Schabel,2072.2
 Andrew Elenbogen,2061.91
 Samuel Chang,2153.45
 Pedro Flores,1840.8
 Kenta Masukado,2005.76
-"Martinez, Carlos [MEX]",1654.64
+Carlos Martinez,1654.64
 Nathan Steuer,1970.73
 Valerie Jade,2035.35
 Alan Hubbard,1871.0
@@ -59,7 +59,7 @@ Neilson Zhang,1756.15
 Tyson Roylance,1701.38
 Pedro Molina,1710.34
 Abe Schnake,2009.29
-"Schuetz, Stefan",2048.34
+Stefan Schütz,2048.34
 Jason Reid,1821.69
 Eli Swafford,2001.44
 Aedan Simons-Rudolph,1785.47
@@ -67,15 +67,15 @@ Dylan Nollen,1961.46
 Kazutaka Oya,1956.53
 Gavin Meagher,1947.04
 Yimin Zhi,1940.81
-"von Stange, Alexander",1894.22
+Alex von Stange,1894.22
 Sophi Seley,1655.87
 Antonin Branis,1885.53
 Bernardo Torres,1909.69
 Wentong Zhang,1735.93
-"Costa, Matthew",2027.77
+Matt Costa,2027.77
 Chris Kral,2023.32
 Adam Kinnaird,1644.33
-"Sochurek, Petr",2064.88
+Petr Sochůrek,2064.88
 Masashiro Kuroda,1951.7
 Isael Feitosa,1912.87
 Rick Hup Beng Lee,1915.77
@@ -85,13 +85,13 @@ Cherukad Sajan,1641.48
 Corey Burkhart,2080.05
 Ben Tudman,2038.12
 Pierre Smith,1946.07
-"Onoda, Kenji",1761.08
+Onoda Kenji,1761.08
 Nathan Kirner,1841.45
 Yi Yang,1947.78
 Gabriel Joglar,1923.89
 Oliver Tomajko,2096.39
-"De Gaetano, Carlo",1691.22
-"Mills Emmett, Asha",2116.08
+Carlo De Gaetano,1691.22
+Asha Mills Emmett,2116.08
 Jake Beardsley,1915.4
 Mae French,2012.28
 Rodrigo Pinheiro,1866.28
@@ -113,7 +113,7 @@ Philip Silberman,2007.98
 Truong Hai Nguyen,1869.32
 Wappa Hamada,1903.52
 Yang He,1907.57
-"Bertram, Timo",1931.61
+Timo Bertram,1931.61
 Collins Mullen,2023.96
 Christian Calcano,1954.05
 Anthony Cuello,1905.98
@@ -123,12 +123,12 @@ Jon Beitler,1695.81
 Cyprien Tron,2077.74
 Gavin Perry,1970.33
 Jake Koenig,2066.65
-"Flynn, Zach",1863.5
+Zach Flynn,1863.5
 Matt Sperling,2149.62
 Manato Hosomi,1724.65
 Brennan Roy,1945.84
 Nathan Hu,1666.98
-"Szyinski, Piotr",1931.53
+Piotr Szyiński,1931.53
 Tyler Steinwand,1778.49
 Shi Tian Lee,1811.61
 Alexey Paulot,2163.63
@@ -136,18 +136,18 @@ Atsushi Nakashima,1844.31
 Aylin Davis,1838.21
 Brandon Kohrs,1844.66
 George Berrett,1735.06
-"Rangel Paez, Edgar Emmanuel",1851.37
+Edgar Rangel,1851.37
 Adriano Melo,1820.22
 Anthony Lee,1801.05
-"Jones, Ben",2099.65
+Ben Jones,2099.65
 Ken Yukuhiro,2266.49
 Nam Dang,1979.55
 Jason Qiu,1812.01
-"Mora Romero, Alejandro",1894.46
+Alejandro Mora Romero,1894.46
 Ryan Condon,2081.68
 Ryan Mullens,2081.42
-"Walker, Austin",1732.27
-"Queralt Garriga, Albert",1834.44
+Austin Walker,1732.27
+Albert Queralt Garriga,1834.44
 Adam Brace,2057.55
 Marco Cammilluzzi,2035.06
 Nicholas Talbot,1915.04
@@ -163,7 +163,7 @@ Julius Fan,2003.13
 Maxx Kominowski,2117.64
 Samuel Pardee,2180.72
 Ryouta Mishina,1820.06
-"Harvey, Clement",1753.25
+Clément Harvey,1753.25
 Huaxing Bai,2023.17
 Eli Kassis,2192.6
 Patricio Roman,1904.57
@@ -171,15 +171,15 @@ Joao Quege,1804.94
 Alex Friedrichsen,1977.56
 Matthew Wright,2047.97
 David Kerrigan,1662.67
-"Kaluzny, Matyas",1825.09
+Matyáš Kalužný,1825.09
 Suorsa Miitri,1677.35
-"Garcia Gonzalez, Sergio",1992.53
-"Sanchez, Francisco",2259.37
-"Xu, Matt",1933.49
+Sergio Garcia,1992.53
+Francisco Sánchez,2259.37
+Matt Xu,1933.49
 Guglielmo Lupi,2146.93
-"Castillo Santos, Daniela Isabel",1598.87
+Isabel Castillo,1598.87
 Xiangjun Dai,1792.48
-"Rodrigues Cavalcante, Marcelo",2017.35
+Marcelo Cavalcante,2017.35
 Lorenzo Terlizzi,2101.88
 Jeff Jao,1746.16
 Nick Deriu,1919.86
@@ -187,34 +187,34 @@ Sebastian Thaler,2089.38
 Josep Sanfeliu,1941.82
 Ryan Normandin,1864.97
 Toni Portolan,2312.79
-"Bossaneli Araujo, William",2047.24
+William Araujo,2047.24
 Ivan Saenz,1766.09
 Marco Belacca,2020.73
 Max Rappaport,1931.02
 Coby Schnepf,1750.73
-"Ng, Hei Wo",1637.99
+"Hei Wo, Johnathan Ng",1637.99
 Shaun Henry,2068.54
-"Stark, Ben S",1950.36
+Benjamin Stark,1950.36
 Robert Wagner-Krankel,1761.91
 Mason Buonadonna,2016.25
 Percy Fang,1976.99
-"White, Thomas [ENG]",1917.17
+Tom White,1917.17
 Jack Potter,1887.72
 Marcus Wosner,1984.88
 Derrick Davis,2087.85
 Elad Stettner,1611.02
-"Fernandez Torres, Alvaro",1799.89
+Alvaro Fernandez Torres,1799.89
 Andrew Cuneo,1908.63
-"Byrd, Michael",1995.58
+Michael Byrd,1995.58
 Christoffer Larsen,2239.7
 Sam Bogue,1912.24
-"Wong, Charles",2042.22
+Charles Wong,2042.22
 Andy Garcia-Romo,2136.65
 Matthew Oomkes,1843.49
 Eduardo Sajgalik,2158.97
 Yuya Tase,1831.88
 Amy James,1827.31
-"Benito, Jaime",1921.05
+Jaime Gonzalo,1921.05
 Javier Ramos,1573.09
 Yuuki Ichikawa,1936.41
 Daniel Goetschel,2113.55
@@ -234,8 +234,8 @@ Daniel Weiss,1678.75
 Arch Dota,2122.96
 James Dimitrov,1997.36
 Eleanor Dubreuil,1727.29
-"Zhang, Rei",1994.78
-"van der Heiden, Jay",1595.48
+Rui Zhang,1994.78
+Jay van der Heiden,1595.48
 Jonny Guttman,1962.19
 Alex Rohan,2083.99
 Devon Straub,2003.3
@@ -248,31 +248,31 @@ Will Krueger,2059.16
 Edgar Magalhaes,1953.51
 Nico Ferrigno,1898.04
 Claire Tian,1711.71
-"Angeles Servin, Alfredo Aaron",1524.51
+Aaron Angeles,1524.51
 Steve Gan,2001.84
-"Cordobes, Albert",1963.27
-"Del Pivo, Marco",2034.2
+Albert Cordobés,1963.27
+Marco Del Pivo,2034.2
 Takeshi Ozawa,1955.18
 Aras Senyuz,1832.34
 Shinnosuke Hando,1932.39
 Shota Yasooka,1972.56
 Raul Porojan,1845.51
 Paul Gabat,1601.45
-"Horiuchi, Makoto",2040.82
+Horiuchi Makoto,2040.82
 Mateo Ferreira,1957.15
 Adam Edelson,2085.97
 Neil Estrada,2077.5
 Muhan Yu,2036.69
 Christian Baker,1819.86
-"Torrico, Carlos",1859.51
-"Inglis, David [USA]",2015.65
+Sebastian Torrico,1859.51
+David Inglis,2015.65
 Vincent Choy,1676.62
 Kazuya Takuwa,1713.87
 Spencer Mazur,1917.67
 Atsuki Kihara,1922.63
-"Morales Macaya, Nicolas",1637.52
+Nicolás Morales Macaya,1637.52
 Chang Zheng,1747.66
-"Blondiaux, Timothee",1839.33
+Timothée Blondiaux,1839.33
 Bryan Rockenbach,1967.31
 Kye Nelson,1961.51
 Guillermo Loli,1959.78
@@ -295,7 +295,7 @@ Robin Courtiat,1794.9
 Toru Inoue,1880.91
 Yiren Jiang,2015.18
 Guillaume Petri,1888.67
-"Ma, Noah",2003.96
+Ma Noah,2003.96
 Mark Tubola,1828.58
 Matt Nass,1965.22
 Willy Edel,1947.25
@@ -308,19 +308,19 @@ Takuya Hasegawa,1896.54
 Julian Riedener,1787.66
 Winston Chamora,2046.85
 Matheus Crusius,1862.17
-"Martin, Adria",2000.64
-"Higgins, Evan [USA]",1808.23
-"Nielsen, Simon",2163.08
-"Kane, Liam",1908.17
-"Santos Esquici, Victor",2011.53
-"Verdierre, Gaetan",1830.01
-"Kikidis, Charalampos",2067.39
-"Offman, Noe",1976.3
-"Lopez, Jorge [MEX]",1661.54
-"Young, Michael M",1764.3
-"Lin, Jeff",1758.22
-"Fauquenoi, Noe",1829.17
-"Weiser, Daniel",2036.21
-"DeBenedetto-Plummer, Michael",2128.96
-"Iriarte Valenzuela, Mauricio",1634.69
-"Stefans, Matthew",1698.21
+Adrià Martín,2000.64
+Evan Higgins,1808.23
+Simon Nielsen,2163.08
+Liam Kane,1908.17
+Victor Santos Esquici,2011.53
+Gaétan Verdierre,1830.01
+Charis Kikidis,2067.39
+Noé Offman,1976.3
+Jorge Lopez,1661.54
+Michael NK Young,1764.3
+Jeff Lin,1758.22
+Noé Fauquenoi,1829.17
+Daniel Weiser,2036.21
+Michael Plummer,2128.96
+Mauricio Iriarte,1634.69
+Matthew Stefansson,1698.21
