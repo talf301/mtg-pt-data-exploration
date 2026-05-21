@@ -22,8 +22,8 @@ Get a runnable Python project skeleton in place with the right dependencies, dir
 - Create: `mtg_scrape/__init__.py` (empty)
 - Create: `tests/__init__.py` (empty)
 - Create: `tests/test_smoke.py`
-- Create: `data/.gitkeep`, `cache/.gitkeep`, `tests/fixtures/.gitkeep`, `notebooks/.gitkeep`
-- Modify: `.gitignore` (already has `cache/`; add `data/*.csv` allowance and `*.parquet` etc.)
+- Create: `data/.gitkeep`, `tests/fixtures/.gitkeep`, `notebooks/.gitkeep` (not `cache/.gitkeep` — `cache/` is gitignored; `fetch.py` mkdirs it at runtime)
+- Modify: `.gitignore` (append python build entries)
 
 - [ ] **Step 1: Write `pyproject.toml`**
 
@@ -120,13 +120,15 @@ See `docs/superpowers/specs/2026-05-21-pt-strixhaven-scraper-design.md` for desi
 Run:
 ```
 mkdir -p data cache tests/fixtures notebooks
-touch data/.gitkeep cache/.gitkeep tests/fixtures/.gitkeep notebooks/.gitkeep
+touch data/.gitkeep tests/fixtures/.gitkeep notebooks/.gitkeep
 ```
+
+`cache/` is gitignored; `fetch.py` will mkdir it at runtime.
 
 - [ ] **Step 8: Commit**
 
 ```
-git add pyproject.toml README.md mtg_scrape/ tests/ data/.gitkeep cache/.gitkeep tests/fixtures/.gitkeep notebooks/.gitkeep .gitignore
+git add pyproject.toml README.md mtg_scrape/ tests/ data/.gitkeep tests/fixtures/.gitkeep notebooks/.gitkeep .gitignore
 git commit -m "Scaffold mtg-pt-data-exploration project"
 ```
 
