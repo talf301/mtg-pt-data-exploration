@@ -878,13 +878,29 @@ git commit -m "Add name normalization and override resolver"
 
 ---
 
-## Task 7: mtgeloproject profile parser (TDD against fixture)
+## Task 7: mtgeloproject matches JSON parser (TDD against fixture)
 
-Parse one mtgeloproject player-profile HTML page into a list of `MatchRow` records covering that player's matches at PT Strixhaven. Selectors derived from the fixtures saved in Task 5.
+**Revised after the Task 5 spike.** mtgeloproject exposes a clean JSON API at `/api/players/<id>/matches` that returns match data keyed by event code. PT Secrets of Strixhaven's event code is `"ptsos"`. We parse that JSON directly rather than scraping rendered HTML.
 
 **Files:**
-- Create: `mtg_scrape/matches_mtgelo.py` (parser only, in this task; orchestrator in Task 8)
+- Create: `mtg_scrape/matches_mtgelo.py` (parser + dataclass; orchestrator in Task 8)
 - Create: `tests/test_matches_mtgelo.py`
+
+The JSON shape for one match record (verbatim from the spike):
+
+```json
+{
+  "match_id": 4015653,
+  "round": "F",
+  "table": 1,
+  "format": "standard",
+  "result": "Lost 2-3",
+  "own_elo": {"start": 2361.56, "end": 2339.86},
+  "opp_data": {"id": "zz14clya", "opp": "Steuer, Nathan", "start": 2156.17}
+}
+```
+
+Top-level structure: `{"ptsos": [match, match, ...], "<other_event>": [...], ...}`. `round` is a string — swiss rounds are stringified ints (`"1"`–`"15"`); top cut uses `"Q"`, `"S"`, `"F"`. `format` is lowercase (`"standard"`, `"draft"`, `"sealed"`). `result` is a single string combining outcome and game score, like `"Won 2-1"`, `"Lost 0-2"`, `"Draw 1-1"`.
 
 - [ ] **Step 1: Write failing tests**
 
@@ -892,161 +908,208 @@ Create `tests/test_matches_mtgelo.py`:
 
 ```python
 from pathlib import Path
-from mtg_scrape.matches_mtgelo import parse_profile_matches, ProfileMatch
+from mtg_scrape.matches_mtgelo import parse_matches_json, ProfileMatch, EVENT_CODE
 
-FIXTURE = Path(__file__).parent / "fixtures" / "mtgelo" / "sample-player.html"
-
-
-def test_returns_some_matches_for_pt_strixhaven():
-    html = FIXTURE.read_text(encoding="utf-8")
-    matches = parse_profile_matches(html, event_filter="Pro Tour Secrets of Strixhaven")
-    assert len(matches) >= 8, f"expected at least 8 rounds, got {len(matches)}"
+FIXTURE = Path(__file__).parent / "fixtures" / "mtgelo" / "api-matches-larsen.json"
+LARSEN_ID = "wrr61zbv"
+LARSEN_NAME = "Christoffer Larsen"
 
 
-def test_match_has_required_fields():
-    html = FIXTURE.read_text(encoding="utf-8")
-    matches = parse_profile_matches(html, event_filter="Pro Tour Secrets of Strixhaven")
+def test_returns_18_matches_for_larsen_at_ptsos():
+    json_text = FIXTURE.read_text(encoding="utf-8")
+    matches = parse_matches_json(json_text, player_name=LARSEN_NAME, player_id=LARSEN_ID)
+    assert len(matches) == 18, f"Larsen played 18 ptsos matches; got {len(matches)}"
+
+
+def test_match_carries_required_fields():
+    matches = parse_matches_json(
+        FIXTURE.read_text(encoding="utf-8"), player_name=LARSEN_NAME, player_id=LARSEN_ID
+    )
     m = matches[0]
     assert isinstance(m, ProfileMatch)
-    assert isinstance(m.round_number, int) and m.round_number >= 1
-    assert m.format_tag in {"Standard", "Booster Draft", "Limited", "Constructed"}
+    assert m.player_name == LARSEN_NAME
+    assert m.player_id == LARSEN_ID
+    assert isinstance(m.match_id, int)
+    assert isinstance(m.round, str) and m.round
+    assert m.format in {"standard", "draft", "sealed"}
     assert m.opponent_name and isinstance(m.opponent_name, str)
+    assert m.opponent_id and isinstance(m.opponent_id, str)
     assert m.result in {"W", "L", "D"}
-    assert m.elo_pre is None or isinstance(m.elo_pre, float)
-    assert m.elo_delta is None or isinstance(m.elo_delta, float)
+    assert m.game_score and isinstance(m.game_score, str)
+    assert isinstance(m.elo_pre, float)
+    assert isinstance(m.elo_post, float)
+    assert isinstance(m.elo_delta, float)
+    assert isinstance(m.opp_elo_pre, float)
 
 
-def test_filters_to_event():
-    html = FIXTURE.read_text(encoding="utf-8")
-    all_matches = parse_profile_matches(html, event_filter=None)
-    pt_matches = parse_profile_matches(html, event_filter="Pro Tour Secrets of Strixhaven")
-    assert len(all_matches) >= len(pt_matches)
+def test_parses_finals_record_specifically():
+    """The finals (match_id=4015653) was Larsen vs Steuer. Larsen lost 2-3, Elo Δ -21.70."""
+    matches = parse_matches_json(
+        FIXTURE.read_text(encoding="utf-8"), player_name=LARSEN_NAME, player_id=LARSEN_ID
+    )
+    finals = [m for m in matches if m.match_id == 4015653]
+    assert len(finals) == 1
+    f = finals[0]
+    assert f.round == "F"
+    assert f.format == "standard"
+    assert f.opponent_name == "Steuer, Nathan"
+    assert f.opponent_id == "zz14clya"
+    assert f.result == "L"
+    assert f.game_score == "2-3"
+    assert f.elo_pre == 2361.56
+    assert f.elo_post == 2339.86
+    assert abs(f.elo_delta - (-21.70)) < 0.01
+
+
+def test_filters_to_event_code():
+    """Only ptsos matches should come back, not any other events Larsen played."""
+    matches = parse_matches_json(
+        FIXTURE.read_text(encoding="utf-8"), player_name=LARSEN_NAME, player_id=LARSEN_ID
+    )
+    # All 18 should be ptsos; event_code is captured on each row
+    assert all(m.event_code == EVENT_CODE for m in matches)
+
+
+def test_round_remains_string():
+    """Round must NOT be coerced to int; top cut uses Q/S/F."""
+    matches = parse_matches_json(
+        FIXTURE.read_text(encoding="utf-8"), player_name=LARSEN_NAME, player_id=LARSEN_ID
+    )
+    rounds = {m.round for m in matches}
+    # Larsen's run: rounds "1"..."15" then "S" and "F" (he got a bye into SF as #2 seed).
+    assert "F" in rounds
+    assert "S" in rounds
+    assert "1" in rounds  # as string, not int
+
+
+def test_result_parsing_split():
+    """'Lost 2-3' should split to result='L', game_score='2-3'."""
+    matches = parse_matches_json(
+        FIXTURE.read_text(encoding="utf-8"), player_name=LARSEN_NAME, player_id=LARSEN_ID
+    )
+    # Find any result we know maps cleanly
+    wins = [m for m in matches if m.result == "W"]
+    losses = [m for m in matches if m.result == "L"]
+    assert wins, "should have some wins"
+    assert losses, "should have some losses"
+    # Each game_score should be of the form N-N
+    for m in matches:
+        a, b = m.game_score.split("-")
+        assert a.isdigit() and b.isdigit()
 ```
 
 - [ ] **Step 2: Run, confirm fails**
 
 Run: `.venv/bin/pytest tests/test_matches_mtgelo.py -v`
-Expected: FAIL — module not found.
+Expected: FAIL — `ModuleNotFoundError: No module named 'mtg_scrape.matches_mtgelo'`.
 
 - [ ] **Step 3: Implement parser portion of `mtg_scrape/matches_mtgelo.py`**
 
-Selectors must match what Task 5 found. Skeleton:
-
 ```python
-"""Scrape mtgeloproject.net player profiles for PT Secrets of Strixhaven matches.
+"""Scrape mtgeloproject.net for PT Secrets of Strixhaven match data via its JSON API.
 
-The scraper:
-  1. Reads the player roster from data/decks.csv.
-  2. For each player, looks up their mtgeloproject profile URL via the
-     site's search.
-  3. Fetches the profile and extracts their PT Strixhaven matches with Elo Δ.
-  4. Dedupes across players by (round_number, frozenset(player_pair)),
-     merging Elo info from both perspectives.
-  5. Writes data/matches.csv.
+This module:
+  1. Defines the ProfileMatch dataclass capturing one match as fetched from one
+     player's perspective.
+  2. Provides parse_matches_json() — converts the JSON returned by
+     /api/players/<id>/matches into ProfileMatch rows for the ptsos event.
+  3. (In Task 8) Adds orchestration: name -> player_id lookup, walk all 325
+     profiles, dedupe two perspectives per match, write data/matches.csv.
 """
 from __future__ import annotations
 
-import argparse
-import csv
+import json
 from dataclasses import dataclass
-from pathlib import Path
-from typing import Iterable
-from urllib.parse import quote_plus
-
-from bs4 import BeautifulSoup
-
-from mtg_scrape.fetch import Fetcher
-from mtg_scrape.names import normalize
 
 
-EVENT_NAME = "Pro Tour Secrets of Strixhaven"
+EVENT_CODE = "ptsos"  # mtgeloproject's internal code for Pro Tour Secrets of Strixhaven
 
 
 @dataclass
 class ProfileMatch:
-    """One match as seen from one player's profile."""
-    player_name: str        # whose profile this came from
-    round_number: int
-    format_tag: str         # "Standard", "Booster Draft", etc.
-    opponent_name: str
-    result: str             # "W" / "L" / "D" from player_name's perspective
-    game_score: str | None  # "2-1" or None if not exposed
-    elo_pre: float | None
-    elo_delta: float | None
-    event_name: str         # so we can filter
+    """One match as fetched from one player's matches API response."""
+    player_name: str        # canonical name from magic.gg (passed in by caller)
+    player_id: str          # mtgeloproject player slug, e.g. "wrr61zbv"
+    match_id: int           # stable global id; the dedupe key across perspectives
+    round: str              # "1".."15" for swiss; "Q"/"S"/"F" for top cut
+    table: int | None
+    format: str             # "standard" / "draft" / "sealed"
+    opponent_name: str      # raw mtgelo "Last, First" string
+    opponent_id: str        # mtgeloproject opponent slug
+    result: str             # "W" / "L" / "D" from player's perspective
+    game_score: str         # "2-1", "0-2", etc.
+    elo_pre: float          # player's own Elo before this match
+    elo_post: float         # player's own Elo after this match
+    elo_delta: float        # elo_post - elo_pre
+    opp_elo_pre: float      # opponent's pre-match Elo, exposed in opp_data.start
+    event_code: str = EVENT_CODE
 
 
-def parse_profile_matches(html: str, event_filter: str | None = EVENT_NAME) -> list[ProfileMatch]:
-    """Parse a player profile page into ProfileMatch rows.
+def parse_matches_json(
+    json_text: str,
+    player_name: str,
+    player_id: str,
+) -> list[ProfileMatch]:
+    """Parse one /api/players/<id>/matches response into ProfileMatch rows.
 
-    `event_filter`: if not None, only return matches whose event_name contains this string.
+    Returns only matches for the PT Secrets of Strixhaven event (key 'ptsos' in the JSON).
     """
-    soup = BeautifulSoup(html, "lxml")
-
-    # ----- REPLACE WITH REAL SELECTORS FROM TASK 5 FIXTURES -----
-    # Pseudocode for shape; actual selectors depend on the live page.
-    player_name = (soup.select_one("h1, .player-name") or soup.title).get_text(strip=True)
+    payload = json.loads(json_text)
+    raw_matches = payload.get(EVENT_CODE, [])
     rows: list[ProfileMatch] = []
-    for tr in soup.select("table.matches tr.match-row"):
-        event_el = tr.select_one(".event")
-        event_name = event_el.get_text(strip=True) if event_el else ""
-        if event_filter and event_filter not in event_name:
-            continue
+    for m in raw_matches:
+        result_str = m.get("result", "")
+        outcome_word, _, game_score = result_str.partition(" ")
+        result = _normalize_outcome(outcome_word)
+        if not game_score:
+            game_score = ""
 
-        round_el = tr.select_one(".round")
-        format_el = tr.select_one(".format")
-        opp_el = tr.select_one(".opponent")
-        res_el = tr.select_one(".result")
-        score_el = tr.select_one(".game-score")
-        elo_pre_el = tr.select_one(".elo-pre")
-        elo_delta_el = tr.select_one(".elo-delta")
-
-        if not (round_el and opp_el and res_el):
-            continue
+        own_elo = m.get("own_elo") or {}
+        opp_data = m.get("opp_data") or {}
+        elo_pre = float(own_elo.get("start"))
+        elo_post = float(own_elo.get("end"))
 
         rows.append(ProfileMatch(
             player_name=player_name,
-            round_number=int(round_el.get_text(strip=True)),
-            format_tag=(format_el.get_text(strip=True) if format_el else ""),
-            opponent_name=opp_el.get_text(strip=True),
-            result=_normalize_result(res_el.get_text(strip=True)),
-            game_score=(score_el.get_text(strip=True) if score_el else None),
-            elo_pre=_parse_float(elo_pre_el),
-            elo_delta=_parse_float(elo_delta_el),
-            event_name=event_name,
+            player_id=player_id,
+            match_id=int(m["match_id"]),
+            round=str(m["round"]),
+            table=int(m["table"]) if m.get("table") is not None else None,
+            format=str(m.get("format", "")),
+            opponent_name=str(opp_data.get("opp", "")),
+            opponent_id=str(opp_data.get("id", "")),
+            result=result,
+            game_score=game_score,
+            elo_pre=elo_pre,
+            elo_post=elo_post,
+            elo_delta=round(elo_post - elo_pre, 4),
+            opp_elo_pre=float(opp_data.get("start")) if opp_data.get("start") is not None else float("nan"),
         ))
     return rows
 
 
-def _normalize_result(text: str) -> str:
-    t = text.strip().upper()
-    if t.startswith("W"):
+def _normalize_outcome(word: str) -> str:
+    """'Won' -> 'W', 'Lost' -> 'L', 'Draw' -> 'D'."""
+    w = word.strip().lower()
+    if w.startswith("won"):
         return "W"
-    if t.startswith("L"):
+    if w.startswith("lost") or w.startswith("loss"):
         return "L"
     return "D"
-
-
-def _parse_float(el) -> float | None:
-    if el is None:
-        return None
-    txt = el.get_text(strip=True).replace("+", "")
-    try:
-        return float(txt)
-    except ValueError:
-        return None
 ```
 
-- [ ] **Step 4: Iterate on selectors until tests pass**
+- [ ] **Step 4: Run tests, confirm pass**
 
 Run: `.venv/bin/pytest tests/test_matches_mtgelo.py -v`
-Open `tests/fixtures/mtgelo/sample-player.html` and adjust selectors to match the real DOM. Re-run until 3 tests pass.
+Expected: 6 passed.
+
+If any test fails, debug by reading the fixture (`tests/fixtures/mtgelo/api-matches-larsen.json`) and the spike notes (`docs/superpowers/spike-notes/2026-05-21-mtgelo-spike.md`). The expected values in the finals-specific test (`match_id=4015653`, opponent `Steuer, Nathan`, Elos 2361.56/2339.86) were independently verified during the spike.
 
 - [ ] **Step 5: Commit**
 
 ```
 git add mtg_scrape/matches_mtgelo.py tests/test_matches_mtgelo.py
-git commit -m "Parse mtgeloproject profile matches"
+git commit -m "Parse mtgeloproject matches API JSON for PT Strixhaven"
 ```
 
 ---
