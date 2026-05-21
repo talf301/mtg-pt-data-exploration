@@ -53,10 +53,9 @@ def parse_matches_json(
 
         own_elo = m.get("own_elo") or {}
         opp_data = m.get("opp_data") or {}
-        elo_pre = float(own_elo.get("start"))
-        elo_post = float(own_elo.get("end"))
-        opp_start = opp_data.get("start")
-        opp_elo_pre = float(opp_start) if opp_start is not None else float("nan")
+        elo_pre = _to_float_or_nan(own_elo.get("start"))
+        elo_post = _to_float_or_nan(own_elo.get("end"))
+        opp_elo_pre = _to_float_or_nan(opp_data.get("start"))
 
         rows.append(ProfileMatch(
             player_name=player_name,
@@ -78,10 +77,31 @@ def parse_matches_json(
 
 
 def _normalize_outcome(word: str) -> str:
-    """'Won' -> 'W', 'Lost' -> 'L', 'Draw' -> 'D'."""
+    """Map mtgeloproject's outcome word to 'W' / 'L' / 'D'.
+
+    Raises ValueError on unknown input so byes/forfeits or future mtgelo
+    strings surface as failures rather than silent draws.
+    """
     w = word.strip().lower()
-    if w.startswith("won"):
+    if w in {"won"}:
         return "W"
-    if w.startswith("lost") or w.startswith("loss"):
+    if w in {"lost", "loss"}:
         return "L"
-    return "D"
+    if w in {"draw", "drew"}:
+        return "D"
+    raise ValueError(f"unknown match outcome word: {word!r}")
+
+
+def _to_float_or_nan(v: object) -> float:
+    """Convert v to float, returning NaN if v is None or not numeric.
+
+    mtgeloproject occasionally omits an elo value (e.g. for byes); we want
+    to keep the row rather than crash. NaN propagates obviously through
+    downstream aggregations.
+    """
+    if v is None:
+        return float("nan")
+    try:
+        return float(v)
+    except (TypeError, ValueError):
+        return float("nan")
