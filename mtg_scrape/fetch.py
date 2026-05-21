@@ -45,10 +45,17 @@ class Fetcher:
                 self.cache_dir.mkdir(parents=True, exist_ok=True)
                 cache_path.write_text(resp.text, encoding="utf-8")
                 return resp.text
-            except (httpx.HTTPStatusError, httpx.TransportError) as exc:
+            except httpx.HTTPStatusError as exc:
                 last_exc = exc
-                backoff = 2 ** attempt
-                time.sleep(backoff)
+                status = exc.response.status_code if exc.response is not None else 0
+                if status != 429 and status < 500:
+                    raise  # not transient, don't retry
+                if attempt < self.max_retries - 1:
+                    time.sleep(2 ** attempt)
+            except httpx.TransportError as exc:
+                last_exc = exc
+                if attempt < self.max_retries - 1:
+                    time.sleep(2 ** attempt)
 
         assert last_exc is not None
         raise last_exc

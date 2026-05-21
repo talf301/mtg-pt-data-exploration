@@ -82,7 +82,7 @@ def test_retry_then_success(tmp_path: Path, monkeypatch):
             self.text = "ok"
         def raise_for_status(self):
             if self.status_code >= 400:
-                raise httpx.HTTPStatusError("boom", request=None, response=None)
+                raise httpx.HTTPStatusError("boom", request=None, response=self)
 
     seq = iter([FlakyResp(503), FlakyResp(200)])
     monkeypatch.setattr(httpx, "get", lambda u, **k: next(seq))
@@ -90,3 +90,51 @@ def test_retry_then_success(tmp_path: Path, monkeypatch):
 
     fetcher = Fetcher(cache_dir=cache_dir, min_interval_s=0.0, max_retries=3)
     assert fetcher.get("https://example.com/flaky") == "ok"
+
+
+def test_4xx_not_retried(tmp_path: Path, monkeypatch):
+    cache_dir = tmp_path / "cache"
+    cache_dir.mkdir()
+
+    class FakeResp:
+        status_code = 404
+        text = ""
+        def raise_for_status(self):
+            raise httpx.HTTPStatusError("not found", request=None, response=self)
+
+    calls = []
+    def fake_get(u, **k):
+        calls.append(u)
+        return FakeResp()
+
+    monkeypatch.setattr(httpx, "get", fake_get)
+    monkeypatch.setattr("mtg_scrape.fetch.time.sleep", lambda s: None)
+
+    fetcher = Fetcher(cache_dir=cache_dir, min_interval_s=0.0, max_retries=3)
+    with pytest.raises(httpx.HTTPStatusError):
+        fetcher.get("https://example.com/missing")
+    assert len(calls) == 1, f"4xx should not retry, but got {len(calls)} calls"
+
+
+def test_5xx_retried_then_fails(tmp_path: Path, monkeypatch):
+    cache_dir = tmp_path / "cache"
+    cache_dir.mkdir()
+
+    class FakeResp:
+        status_code = 503
+        text = ""
+        def raise_for_status(self):
+            raise httpx.HTTPStatusError("server error", request=None, response=self)
+
+    calls = []
+    monkeypatch.setattr(httpx, "get", lambda u, **k: (calls.append(u), FakeResp())[1])
+
+    sleeps = []
+    monkeypatch.setattr("mtg_scrape.fetch.time.sleep", lambda s: sleeps.append(s))
+
+    fetcher = Fetcher(cache_dir=cache_dir, min_interval_s=0.0, max_retries=3)
+    with pytest.raises(httpx.HTTPStatusError):
+        fetcher.get("https://example.com/dead")
+    assert len(calls) == 3, "5xx should retry up to max_retries"
+    # 2 sleeps between 3 attempts; no sleep after the final attempt
+    assert sleeps == [1, 2], f"expected backoffs [1, 2], got {sleeps}"
