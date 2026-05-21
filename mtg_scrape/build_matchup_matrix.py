@@ -139,3 +139,84 @@ def render_csvs(wins: pd.DataFrame, losses: pd.DataFrame, out_dir: Path) -> None
     string_df.to_csv(out_dir / "matchup_matrix.csv")
     numeric_df.to_csv(out_dir / "matchup_matrix_numeric.csv")
     counts_df.to_csv(out_dir / "matchup_matrix_counts.csv")
+
+
+import matplotlib
+
+matplotlib.use("Agg")  # no GUI; we only write files
+import matplotlib.pyplot as plt
+from matplotlib.colors import TwoSlopeNorm
+
+LOW_SAMPLE_THRESHOLD = 5  # cells with fewer total matches are de-emphasized
+
+
+def render_png(
+    wins: pd.DataFrame,
+    losses: pd.DataFrame,
+    out_path: Path,
+    low_sample_threshold: int = LOW_SAMPLE_THRESHOLD,
+) -> None:
+    """Render the matchup matrix as a PNG heatmap.
+
+    Colormap: RdBu_r diverging, centered at 0.5. Cells with
+    wins+losses < low_sample_threshold are rendered with reduced alpha.
+    Diagonal cells are blanked (no color, em-dash label).
+    """
+    out_path = Path(out_path)
+    out_path.parent.mkdir(parents=True, exist_ok=True)
+
+    labels = list(wins.index)
+    n = len(labels)
+    wr = compute_win_rate(wins, losses)  # NaN on diagonal and empty cells
+
+    # Build cell label strings and alpha mask
+    cell_text = [[""] * n for _ in range(n)]
+    alpha_mask = [[1.0] * n for _ in range(n)]
+    for i, row in enumerate(labels):
+        for j, col in enumerate(labels):
+            w = int(wins.loc[row, col])
+            l = int(losses.loc[row, col])
+            total = w + l
+            if row == col or total == 0:
+                cell_text[i][j] = EM_DASH
+                alpha_mask[i][j] = 0.0  # blank diagonal/empty
+            else:
+                pct = round(100 * w / total)
+                cell_text[i][j] = f"{pct}% ({w}-{l})"
+                if total < low_sample_threshold:
+                    alpha_mask[i][j] = 0.4
+
+    fig, ax = plt.subplots(figsize=(max(8, 0.9 * n), max(7, 0.8 * n)))
+    norm = TwoSlopeNorm(vmin=0.0, vcenter=0.5, vmax=1.0)
+    cmap = plt.get_cmap("RdBu_r")
+
+    for i in range(n):
+        for j in range(n):
+            value = wr.iat[i, j]
+            color = (1.0, 1.0, 1.0, 0.0) if pd.isna(value) else (*cmap(norm(value))[:3], alpha_mask[i][j])
+            ax.add_patch(plt.Rectangle((j, n - 1 - i), 1, 1, facecolor=color, edgecolor="white"))
+            ax.text(j + 0.5, n - 1 - i + 0.5, cell_text[i][j], ha="center", va="center", fontsize=8)
+
+    ax.set_xlim(0, n)
+    ax.set_ylim(0, n)
+    ax.set_xticks([j + 0.5 for j in range(n)])
+    ax.set_yticks([n - 1 - i + 0.5 for i in range(n)])
+    ax.set_xticklabels(labels, rotation=45, ha="right", fontsize=9)
+    ax.set_yticklabels(labels, fontsize=9)
+    ax.set_xlabel("Opponent archetype", fontsize=10)
+    ax.set_ylabel("Row archetype's win rate vs column", fontsize=10)
+    ax.set_title("PT Secrets of Strixhaven — Standard archetype matchup matrix", fontsize=11)
+    ax.set_aspect("equal")
+    ax.tick_params(top=False, bottom=False, left=False, right=False)
+    for spine in ax.spines.values():
+        spine.set_visible(False)
+
+    sm = plt.cm.ScalarMappable(cmap=cmap, norm=norm)
+    sm.set_array([])
+    cbar = fig.colorbar(sm, ax=ax, shrink=0.7, label="Win rate")
+    cbar.set_ticks([0.0, 0.25, 0.5, 0.75, 1.0])
+    cbar.set_ticklabels(["0%", "25%", "50%", "75%", "100%"])
+
+    fig.tight_layout()
+    fig.savefig(out_path, dpi=150)
+    plt.close(fig)

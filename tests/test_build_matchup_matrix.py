@@ -197,3 +197,17 @@ def test_empty_cell_renders_as_em_dash_in_string(tmp_path: Path):
 
     df = pd.read_csv(tmp_path / "matchup_matrix.csv", index_col=0)
     assert df.loc["A", "B"] == "—"
+
+
+from mtg_scrape.build_matchup_matrix import render_png
+
+
+def test_render_png_writes_a_non_empty_file(tmp_path: Path):
+    wins = pd.DataFrame([[0, 2], [1, 0]], index=["A", "B"], columns=["A", "B"])
+    losses = pd.DataFrame([[0, 1], [2, 0]], index=["A", "B"], columns=["A", "B"])
+
+    out_path = tmp_path / "matchup_matrix.png"
+    render_png(wins, losses, out_path=out_path)
+
+    assert out_path.exists()
+    assert out_path.stat().st_size > 1000  # non-trivial PNG, not a stub
