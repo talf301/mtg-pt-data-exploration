@@ -725,6 +725,17 @@ def test_normalize_collapses_whitespace():
     assert normalize("Marcio   Carvalho") == "marcio carvalho"
 
 
+def test_normalize_swaps_last_comma_first():
+    # mtgeloproject's API returns opponent names in "Last, First" order;
+    # magic.gg lists "First Last". Normalize should fold both to the same form.
+    assert normalize("Steuer, Nathan") == "nathan steuer"
+    assert normalize("Domínguez, Javier") == "javier dominguez"
+
+
+def test_normalize_leaves_uncomma_names_alone():
+    assert normalize("Nathan Steuer") == "nathan steuer"
+
+
 def test_resolver_matches_canonical_by_normalized_name():
     # magic.gg has these canonical names. Inputs may differ only in accents/case.
     resolver = build_resolver(
@@ -785,9 +796,18 @@ from typing import Callable, Iterable
 
 
 def normalize(name: str) -> str:
-    """Fold case, strip accents, collapse whitespace."""
+    """Fold case, swap "Last, First" -> "First Last", strip accents, collapse whitespace.
+
+    mtgeloproject's JSON returns opponent names as "Last, First". magic.gg uses
+    "First Last". Both must normalize to the same form for cross-source joins.
+    """
     if name is None:
         return ""
+    # "Last, First" -> "First Last" (only one comma, both halves non-empty)
+    if "," in name:
+        parts = [p.strip() for p in name.split(",", 1)]
+        if len(parts) == 2 and parts[0] and parts[1]:
+            name = f"{parts[1]} {parts[0]}"
     decomposed = unicodedata.normalize("NFKD", name)
     no_accents = "".join(ch for ch in decomposed if not unicodedata.combining(ch))
     return " ".join(no_accents.lower().split())
@@ -847,7 +867,7 @@ magic_gg_name,mtgelo_name
 - [ ] **Step 5: Run tests, confirm pass**
 
 Run: `.venv/bin/pytest tests/test_names.py -v`
-Expected: 6 passed.
+Expected: 8 passed.
 
 - [ ] **Step 6: Commit**
 
