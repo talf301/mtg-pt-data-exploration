@@ -220,3 +220,32 @@ def render_png(
     fig.tight_layout()
     fig.savefig(out_path, dpi=150)
     plt.close(fig)
+
+
+import argparse
+
+
+def main(argv: list[str] | None = None) -> None:
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--matchups", default="data/matchups.csv")
+    parser.add_argument("--out-dir", default="data")
+    parser.add_argument("--top-n", type=int, default=10)
+    args = parser.parse_args(argv)
+
+    matchups = pd.read_csv(args.matchups)
+    labels = top_n_archetypes(matchups, n=args.top_n) + [OTHER_LABEL]
+    long = to_long_frame(matchups, top_n=labels[:-1])  # exclude OTHER from the top-N list
+    wins, losses = compute_matrix(long, ordered_labels=labels)
+
+    out_dir = Path(args.out_dir)
+    render_csvs(wins, losses, out_dir=out_dir)
+    render_png(wins, losses, out_path=out_dir / "matchup_matrix.png")
+
+    print(f"Wrote matchup matrix artifacts to {out_dir}:")
+    for name in ("matchup_matrix.csv", "matchup_matrix_numeric.csv",
+                 "matchup_matrix_counts.csv", "matchup_matrix.png"):
+        print(f"  - {name}")
+
+
+if __name__ == "__main__":
+    main()

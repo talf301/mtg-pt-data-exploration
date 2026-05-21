@@ -211,3 +211,29 @@ def test_render_png_writes_a_non_empty_file(tmp_path: Path):
 
     assert out_path.exists()
     assert out_path.stat().st_size > 1000  # non-trivial PNG, not a stub
+
+
+from mtg_scrape.build_matchup_matrix import main
+
+
+def test_end_to_end_smoke_produces_all_four_files(tmp_path: Path):
+    matchups_path = tmp_path / "matchups.csv"
+    matchups_path.write_text(
+        "match_id,round,player_a,archetype_a,elo_a_pre,elo_a_post,player_b,archetype_b,elo_b_pre,elo_b_post,result,game_score\n"
+        "1,4,P1,IzzetProwess,1800,1810,P2,Mono-Green,1700,1690,W,2-1\n"
+        "2,5,P3,IzzetProwess,1750,1760,P4,Mono-Green,1820,1810,W,2-0\n"
+        "3,6,P5,Mono-Green,1900,1910,P6,IzzetProwess,1880,1870,W,2-1\n",
+        encoding="utf-8",
+    )
+    out_dir = tmp_path / "out"
+
+    main(["--matchups", str(matchups_path), "--out-dir", str(out_dir), "--top-n", "2"])
+
+    assert (out_dir / "matchup_matrix.csv").exists()
+    assert (out_dir / "matchup_matrix_numeric.csv").exists()
+    assert (out_dir / "matchup_matrix_counts.csv").exists()
+    assert (out_dir / "matchup_matrix.png").exists()
+
+    df = pd.read_csv(out_dir / "matchup_matrix.csv", index_col=0)
+    assert df.loc["IzzetProwess", "Mono-Green"] == "67% (2-1)"
+    assert df.loc["Mono-Green", "IzzetProwess"] == "33% (1-2)"
