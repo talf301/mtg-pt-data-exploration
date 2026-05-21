@@ -270,7 +270,7 @@ class Fetcher:
     min_interval_s: float = 1.0
     max_retries: int = 3
     timeout_s: float = 30.0
-    _last_request_at: float = 0.0  # monotonic timestamp
+    _last_request_at: float | None = None  # monotonic timestamp; None = no prior request
 
     def _cache_path_for(self, url: str) -> Path:
         digest = hashlib.sha256(url.encode("utf-8")).hexdigest()
@@ -282,10 +282,10 @@ class Fetcher:
             return cache_path.read_text(encoding="utf-8")
 
         # Rate-limit: sleep until min_interval_s has elapsed since last request.
-        now = time.monotonic()
-        elapsed = now - self._last_request_at
-        if self._last_request_at > 0 and elapsed < self.min_interval_s:
-            time.sleep(self.min_interval_s - elapsed)
+        if self._last_request_at is not None:
+            elapsed = time.monotonic() - self._last_request_at
+            if elapsed < self.min_interval_s:
+                time.sleep(self.min_interval_s - elapsed)
 
         last_exc: Exception | None = None
         for attempt in range(self.max_retries):
