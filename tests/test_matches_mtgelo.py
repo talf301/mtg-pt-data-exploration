@@ -147,3 +147,133 @@ def test_missing_elo_values_become_nan():
     assert math.isnan(m.elo_post)
     assert math.isnan(m.elo_delta)
     assert math.isnan(m.opp_elo_pre)
+
+
+# ===== Task 8: orchestrator tests =====
+
+import math
+from mtg_scrape.matches_mtgelo import (
+    MergedMatch,
+    find_player_id,
+    merge_match_perspectives,
+    split_name_for_search,
+)
+
+SEARCH_AUTOREDIRECT_FIXTURE = (
+    Path(__file__).parent / "fixtures" / "mtgelo" / "search-results-steuer.html"
+)
+SEARCH_DISAMBIG_FIXTURE = (
+    Path(__file__).parent / "fixtures" / "mtgelo" / "search-results-larsen.html"
+)
+
+
+# ----- split_name_for_search -----
+
+def test_split_name_for_search_simple():
+    assert split_name_for_search("Nathan Steuer") == ("Steuer", "Nathan")
+
+
+def test_split_name_for_search_with_middle():
+    # last word is surname; everything before is first/middle
+    assert split_name_for_search("Jose Maria Rodriguez") == ("Rodriguez", "Jose Maria")
+
+
+def test_split_name_for_search_handles_accents():
+    # don't strip accents on the search URL; pass through verbatim
+    assert split_name_for_search("Javier Domínguez") == ("Domínguez", "Javier")
+
+
+# ----- find_player_id -----
+
+class _FakeFetcher:
+    """Maps URLs to fixture HTML for offline testing of find_player_id."""
+    def __init__(self, url_map: dict[str, str]):
+        self._map = url_map
+
+    def get(self, url: str) -> str:
+        return self._map[url]
+
+
+def test_find_player_id_auto_redirect_extracts_playerid_from_astro_island():
+    fetcher = _FakeFetcher({
+        "https://mtgeloproject.net/search/Steuer/Nathan":
+            SEARCH_AUTOREDIRECT_FIXTURE.read_text(encoding="utf-8"),
+    })
+    assert find_player_id(fetcher, "Nathan Steuer") == "zz14clya"
+
+
+def test_find_player_id_disambig_picks_ptsos_row():
+    fetcher = _FakeFetcher({
+        "https://mtgeloproject.net/search/Larsen/Christoffer":
+            SEARCH_DISAMBIG_FIXTURE.read_text(encoding="utf-8"),
+    })
+    # Christoffer Larsen's profile is wrr61zbv per the spike notes; he played PT SOS.
+    assert find_player_id(fetcher, "Christoffer Larsen") == "wrr61zbv"
+
+
+# ----- merge_match_perspectives -----
+
+def _pm(player_name, player_id, opponent_name, opponent_id, result, elo_pre, elo_post,
+        opp_elo_pre, match_id=1, round_="4", fmt="standard", game_score="2-1", table=1):
+    return ProfileMatch(
+        player_name=player_name, player_id=player_id, match_id=match_id,
+        round=round_, table=table, format=fmt,
+        opponent_name=opponent_name, opponent_id=opponent_id,
+        result=result, game_score=game_score,
+        elo_pre=elo_pre, elo_post=elo_post, elo_delta=round(elo_post - elo_pre, 4),
+        opp_elo_pre=opp_elo_pre,
+    )
+
+
+def test_merge_two_perspectives_dedupes_by_match_id():
+    a = _pm("Nathan Steuer", "zz14clya", "Larsen, Christoffer", "wrr61zbv",
+            "W", 1850.0, 1862.0, 1830.0)
+    b = _pm("Christoffer Larsen", "wrr61zbv", "Steuer, Nathan", "zz14clya",
+            "L", 1830.0, 1818.0, 1850.0)
+    merged = merge_match_perspectives([a, b])
+    assert len(merged) == 1
+    m = merged[0]
+    # Order by player_id ascending: "wrr61zbv" < "zz14clya" -> Larsen is player_a
+    assert m.player_a_id == "wrr61zbv"
+    assert m.player_b_id == "zz14clya"
+    assert m.player_a_name == "Christoffer Larsen"  # canonical magic.gg form
+    assert m.player_b_name == "Nathan Steuer"
+    assert m.result == "L"  # Larsen lost
+    assert m.player_a_elo_pre == 1830.0
+    assert m.player_a_elo_post == 1818.0
+    assert m.player_b_elo_pre == 1850.0
+    assert m.player_b_elo_post == 1862.0
+
+
+def test_merge_single_sided_fills_opponent_elo_pre_from_opp_data():
+    # Only fetched Steuer's perspective; Larsen was unresolved.
+    only = _pm("Nathan Steuer", "zz14clya", "Larsen, Christoffer", "wrr61zbv",
+               "W", 1850.0, 1862.0, 1830.0)
+    merged = merge_match_perspectives([only])
+    assert len(merged) == 1
+    m = merged[0]
+    # player_a still ordered by id ascending; Larsen's id wins
+    assert m.player_a_id == "wrr61zbv"
+    assert m.player_a_name == "Larsen, Christoffer"  # raw mtgelo form, since we never fetched
+    assert m.player_a_elo_pre == 1830.0  # from opp_data.start
+    assert math.isnan(m.player_a_elo_post)
+    assert math.isnan(m.player_a_elo_delta)
+    assert m.player_b_id == "zz14clya"
+    assert m.player_b_name == "Nathan Steuer"
+    assert m.player_b_elo_pre == 1850.0
+    assert m.player_b_elo_post == 1862.0
+    assert m.result == "L"  # flipped from Steuer's "W" because Larsen is player_a
+
+
+def test_merge_carries_match_metadata():
+    a = _pm("Nathan Steuer", "zz14clya", "Larsen, Christoffer", "wrr61zbv",
+            "W", 1850.0, 1862.0, 1830.0, match_id=4015653, round_="F",
+            fmt="standard", game_score="3-2", table=1)
+    merged = merge_match_perspectives([a])
+    m = merged[0]
+    assert m.match_id == 4015653
+    assert m.round == "F"
+    assert m.format == "standard"
+    assert m.table == 1
+    # game_score is from player_a's perspective; player_a is Larsen, who lost 2-3
+    assert m.game_score == "2-3"
