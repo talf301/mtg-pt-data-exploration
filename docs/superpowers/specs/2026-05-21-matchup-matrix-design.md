@@ -39,6 +39,8 @@ All under `data/`:
 
 Rows and columns are labeled by archetype. "Other" is the 11th label, aggregating the 22 sub-top-10 archetypes.
 
+Each output also carries a rightmost **"Total"** column showing each archetype's overall record across all opponents (including mirror matches). Same cell format as the matrix proper (`"52% (374-345)"` in the string CSV; float win rate in the numeric CSV; `"374-345"` in the counts CSV; colored cell with annotation in the PNG, visually offset from the main matrix by a small gap). Useful for cross-checking row totals against published reference tallies.
+
 ## Algorithm
 
 ```

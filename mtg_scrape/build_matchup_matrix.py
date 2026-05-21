@@ -113,9 +113,25 @@ def _assert_symmetric(wins: pd.DataFrame, losses: pd.DataFrame) -> None:
             )
 
 
+def compute_overall(
+    wins: pd.DataFrame, losses: pd.DataFrame
+) -> tuple[pd.Series, pd.Series]:
+    """Sum each archetype's wins and losses across all opponents.
+
+    Mirror matches on the diagonal ARE included: each mirror contributes 1 W
+    and 1 L to the archetype's totals, leaving the per-archetype win rate
+    unchanged but inflating the games-played count to reflect every game
+    that archetype played.
+    """
+    overall_wins = wins.sum(axis=1).astype(int)
+    overall_losses = losses.sum(axis=1).astype(int)
+    return overall_wins, overall_losses
+
+
 from pathlib import Path
 
 EM_DASH = "—"  # U+2014
+TOTAL_LABEL = "Total"
 
 
 def _format_cell_string(wins: int, losses: int, is_diagonal: bool) -> str:
@@ -132,7 +148,11 @@ def _format_counts_string(wins: int, losses: int, is_diagonal: bool) -> str:
 
 
 def render_csvs(wins: pd.DataFrame, losses: pd.DataFrame, out_dir: Path) -> None:
-    """Emit matchup_matrix.csv, matchup_matrix_numeric.csv, and matchup_matrix_counts.csv."""
+    """Emit matchup_matrix.csv, matchup_matrix_numeric.csv, and matchup_matrix_counts.csv.
+
+    Each output gains a rightmost "Total" column carrying per-archetype overall
+    record across all opponents (mirrors included).
+    """
     out_dir = Path(out_dir)
     out_dir.mkdir(parents=True, exist_ok=True)
 
@@ -155,6 +175,19 @@ def render_csvs(wins: pd.DataFrame, losses: pd.DataFrame, out_dir: Path) -> None
     )
     numeric_df = compute_win_rate(wins, losses)
 
+    overall_wins, overall_losses = compute_overall(wins, losses)
+    overall_total = overall_wins + overall_losses
+
+    string_df[TOTAL_LABEL] = [
+        _format_cell_string(int(overall_wins.loc[r]), int(overall_losses.loc[r]), is_diagonal=False)
+        for r in labels
+    ]
+    counts_df[TOTAL_LABEL] = [
+        _format_counts_string(int(overall_wins.loc[r]), int(overall_losses.loc[r]), is_diagonal=False)
+        for r in labels
+    ]
+    numeric_df[TOTAL_LABEL] = overall_wins.astype(float).div(overall_total.where(overall_total > 0))
+
     string_df.to_csv(out_dir / "matchup_matrix.csv")
     numeric_df.to_csv(out_dir / "matchup_matrix_numeric.csv")
     counts_df.to_csv(out_dir / "matchup_matrix_counts.csv")
@@ -167,6 +200,7 @@ import matplotlib.pyplot as plt
 from matplotlib.colors import TwoSlopeNorm
 
 LOW_SAMPLE_THRESHOLD = 5  # cells with fewer total matches are de-emphasized
+TOTAL_COL_GAP = 0.3       # whitespace between matrix proper and the Total column
 
 
 def render_png(
@@ -180,6 +214,8 @@ def render_png(
     Colormap: RdBu_r diverging, centered at 0.5. Cells with
     wins+losses < low_sample_threshold are rendered with reduced alpha.
     Diagonal cells are blanked (no color, em-dash label).
+    A rightmost "Total" column shows each archetype's overall record, offset
+    from the main matrix by a small whitespace gap.
     """
     out_path = Path(out_path)
     out_path.parent.mkdir(parents=True, exist_ok=True)
@@ -187,6 +223,7 @@ def render_png(
     labels = list(wins.index)
     n = len(labels)
     wr = compute_win_rate(wins, losses)  # NaN on diagonal and empty cells
+    overall_wins, overall_losses = compute_overall(wins, losses)
 
     # Build cell label strings and alpha mask
     cell_text = [[""] * n for _ in range(n)]
@@ -205,7 +242,9 @@ def render_png(
                 if total < low_sample_threshold:
                     alpha_mask[i][j] = 0.4
 
-    fig, ax = plt.subplots(figsize=(max(8, 0.9 * n), max(7, 0.8 * n)))
+    total_col_left = n + TOTAL_COL_GAP
+
+    fig, ax = plt.subplots(figsize=(max(8, 0.9 * (n + 1)), max(7, 0.8 * n)))
     norm = TwoSlopeNorm(vmin=0.0, vcenter=0.5, vmax=1.0)
     cmap = plt.get_cmap("RdBu_r")
 
@@ -216,13 +255,28 @@ def render_png(
             ax.add_patch(plt.Rectangle((j, n - 1 - i), 1, 1, facecolor=color, edgecolor="white"))
             ax.text(j + 0.5, n - 1 - i + 0.5, cell_text[i][j], ha="center", va="center", fontsize=8)
 
-    ax.set_xlim(0, n)
+    # Total column (rightmost, offset by TOTAL_COL_GAP)
+    for i, label in enumerate(labels):
+        w = int(overall_wins.loc[label])
+        l = int(overall_losses.loc[label])
+        total = w + l
+        if total == 0:
+            color = (1.0, 1.0, 1.0, 0.0)
+            text = EM_DASH
+        else:
+            wr_val = w / total
+            color = (*cmap(norm(wr_val))[:3], 1.0)
+            text = f"{round(100 * wr_val)}% ({w}-{l})"
+        ax.add_patch(plt.Rectangle((total_col_left, n - 1 - i), 1, 1, facecolor=color, edgecolor="white"))
+        ax.text(total_col_left + 0.5, n - 1 - i + 0.5, text, ha="center", va="center", fontsize=8, weight="bold")
+
+    ax.set_xlim(0, total_col_left + 1)
     ax.set_ylim(0, n)
-    ax.set_xticks([j + 0.5 for j in range(n)])
+    ax.set_xticks([j + 0.5 for j in range(n)] + [total_col_left + 0.5])
     ax.set_yticks([n - 1 - i + 0.5 for i in range(n)])
-    ax.set_xticklabels(labels, rotation=45, ha="right", fontsize=9)
+    ax.set_xticklabels(labels + [TOTAL_LABEL], rotation=45, ha="right", fontsize=9)
     ax.set_yticklabels(labels, fontsize=9)
-    ax.set_xlabel("Opponent archetype", fontsize=10)
+    ax.set_xlabel("Opponent archetype (rightmost: overall total)", fontsize=10)
     ax.set_ylabel("Row archetype's win rate vs column", fontsize=10)
     ax.set_title("PT Secrets of Strixhaven — Standard archetype matchup matrix", fontsize=11)
     ax.set_aspect("equal")

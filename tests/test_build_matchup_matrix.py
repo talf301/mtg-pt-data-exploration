@@ -255,3 +255,77 @@ def test_assert_symmetric_raises_on_asymmetric_matrix():
     losses = pd.DataFrame([[0, 1], [3, 0]], index=["A", "B"], columns=["A", "B"])
     with pytest.raises(AssertionError, match="symmetry violated"):
         _assert_symmetric(wins, losses)
+
+
+from mtg_scrape.build_matchup_matrix import compute_overall, TOTAL_LABEL
+
+
+def test_compute_overall_sums_each_row():
+    # A: 0 vs A, 2 vs B, 1 vs C wins -> total 3 wins; losses 0+1+2 -> 3 losses
+    wins = pd.DataFrame([[0, 2, 1], [1, 0, 0], [2, 0, 0]], index=["A", "B", "C"], columns=["A", "B", "C"])
+    losses = pd.DataFrame([[0, 1, 2], [2, 0, 0], [1, 0, 0]], index=["A", "B", "C"], columns=["A", "B", "C"])
+    overall_wins, overall_losses = compute_overall(wins, losses)
+    assert overall_wins.loc["A"] == 3
+    assert overall_losses.loc["A"] == 3
+
+
+def test_compute_overall_includes_mirror_diagonal():
+    """A mirror match contributes 1 W and 1 L on the diagonal; those count toward the overall."""
+    m = _matchups([
+        ("IzzetProwess", "IzzetProwess", "W"),  # mirror; contributes 1W + 1L to diag
+        ("IzzetProwess", "Mono-Green", "W"),    # non-mirror
+    ])
+    long = to_long_frame(m, top_n=["IzzetProwess", "Mono-Green"])
+    wins, losses = compute_matrix(long, ordered_labels=["IzzetProwess", "Mono-Green"])
+    overall_wins, overall_losses = compute_overall(wins, losses)
+    # Izzet plays 3 game outcomes: 1 W (vs MGL) + 1 W + 1 L (mirror) = 2 W and 1 L total
+    assert overall_wins.loc["IzzetProwess"] == 2
+    assert overall_losses.loc["IzzetProwess"] == 1
+
+
+def test_string_csv_has_total_column(tmp_path: Path):
+    # A goes 2-1 vs B; A's overall is 2W-1L = 67%
+    wins = pd.DataFrame([[0, 2], [1, 0]], index=["A", "B"], columns=["A", "B"])
+    losses = pd.DataFrame([[0, 1], [2, 0]], index=["A", "B"], columns=["A", "B"])
+
+    render_csvs(wins, losses, out_dir=tmp_path)
+
+    df = pd.read_csv(tmp_path / "matchup_matrix.csv", index_col=0)
+    assert TOTAL_LABEL in df.columns
+    assert df.loc["A", TOTAL_LABEL] == "67% (2-1)"
+    assert df.loc["B", TOTAL_LABEL] == "33% (1-2)"
+
+
+def test_numeric_csv_has_total_column(tmp_path: Path):
+    wins = pd.DataFrame([[0, 2], [1, 0]], index=["A", "B"], columns=["A", "B"])
+    losses = pd.DataFrame([[0, 1], [2, 0]], index=["A", "B"], columns=["A", "B"])
+
+    render_csvs(wins, losses, out_dir=tmp_path)
+
+    df = pd.read_csv(tmp_path / "matchup_matrix_numeric.csv", index_col=0)
+    assert df.loc["A", TOTAL_LABEL] == pytest.approx(2 / 3)
+    assert df.loc["B", TOTAL_LABEL] == pytest.approx(1 / 3)
+
+
+def test_counts_csv_has_total_column(tmp_path: Path):
+    wins = pd.DataFrame([[0, 2], [1, 0]], index=["A", "B"], columns=["A", "B"])
+    losses = pd.DataFrame([[0, 1], [2, 0]], index=["A", "B"], columns=["A", "B"])
+
+    render_csvs(wins, losses, out_dir=tmp_path)
+
+    df = pd.read_csv(tmp_path / "matchup_matrix_counts.csv", index_col=0)
+    assert df.loc["A", TOTAL_LABEL] == "2-1"
+    assert df.loc["B", TOTAL_LABEL] == "1-2"
+
+
+def test_total_column_includes_mirror_matches_in_count(tmp_path: Path):
+    """Mirror matches inflate the total games but keep win rate unchanged for that side."""
+    # A vs A: 1 W (so A also has 1 L on diag). Plus A 2-0 vs B.
+    wins = pd.DataFrame([[1, 2], [0, 0]], index=["A", "B"], columns=["A", "B"])
+    losses = pd.DataFrame([[1, 0], [2, 0]], index=["A", "B"], columns=["A", "B"])
+
+    render_csvs(wins, losses, out_dir=tmp_path)
+
+    df = pd.read_csv(tmp_path / "matchup_matrix_counts.csv", index_col=0)
+    # A's overall: 1 mirror W + 2 vs B = 3 W; 1 mirror L + 0 vs B = 1 L  → 3-1
+    assert df.loc["A", TOTAL_LABEL] == "3-1"
