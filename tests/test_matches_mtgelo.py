@@ -132,6 +132,15 @@ def test_draw_outcome_normalized_to_D():
     assert matches[0].game_score == "1-1"
 
 
+def test_id_outcome_normalized_to_D():
+    """Intentional draws are recorded as 'ID 0-0' (no game score). Map to D."""
+    matches = parse_matches_json(
+        _synthetic_payload("ID 0-0"), player_name="x", player_id="y"
+    )
+    assert matches[0].result == "D"
+    assert matches[0].game_score == "0-0"
+
+
 def test_unknown_outcome_raises_value_error():
     with pytest.raises(ValueError, match="unknown match outcome"):
         parse_matches_json(_synthetic_payload("Bye 0-0"), player_name="x", player_id="y")
@@ -156,6 +165,7 @@ from mtg_scrape.matches_mtgelo import (
     MergedMatch,
     find_player_id,
     merge_match_perspectives,
+    scrape_all_players,
     split_name_for_search,
 )
 
@@ -277,3 +287,49 @@ def test_merge_carries_match_metadata():
     assert m.table == 1
     # game_score is from player_a's perspective; player_a is Larsen, who lost 2-3
     assert m.game_score == "2-3"
+
+
+# ----- _flip_game_score -----
+
+def test_flip_game_score_handles_normal_score():
+    from mtg_scrape.matches_mtgelo import _flip_game_score
+    assert _flip_game_score("2-3") == "3-2"
+    assert _flip_game_score("0-2") == "2-0"
+
+
+def test_flip_game_score_passes_through_empty_string():
+    from mtg_scrape.matches_mtgelo import _flip_game_score
+    assert _flip_game_score("") == ""
+
+
+def test_flip_game_score_raises_on_malformed():
+    from mtg_scrape.matches_mtgelo import _flip_game_score
+    with pytest.raises(ValueError):
+        _flip_game_score("2-1-0")
+    with pytest.raises(ValueError):
+        _flip_game_score("abc")
+
+
+# ----- scrape_all_players -----
+
+def test_scrape_all_players_skips_unresolved_and_continues():
+    """If find_player_id returns None for one roster entry, that name is collected as
+    unresolved and the next roster entry still gets processed."""
+    api_url_steuer = "https://mtgeloproject.net/api/players/zz14clya/matches"
+    search_url_steuer = "https://mtgeloproject.net/search/Steuer/Nathan"
+    # Empty-result search for unresolvable player
+    search_url_phantom = "https://mtgeloproject.net/search/Player/Phantom"
+
+    fetcher = _FakeFetcher({
+        search_url_phantom: "<html><body><main>No matches found.</main></body></html>",
+        search_url_steuer: SEARCH_AUTOREDIRECT_FIXTURE.read_text(encoding="utf-8"),
+        api_url_steuer: (Path(__file__).parent / "fixtures" / "mtgelo" /
+                        "api-matches-steuer.json").read_text(encoding="utf-8"),
+    })
+    perspectives, unresolved, unresolved_opp_count = scrape_all_players(
+        fetcher, ["Phantom Player", "Nathan Steuer"]
+    )
+    assert unresolved == ["Phantom Player"]
+    assert isinstance(unresolved_opp_count, int)
+    assert len(perspectives) > 0  # Steuer's matches were collected
+    assert all(p.player_name == "Nathan Steuer" for p in perspectives)

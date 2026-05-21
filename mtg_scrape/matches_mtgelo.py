@@ -251,7 +251,7 @@ def _pick_disambig_row(soup: BeautifulSoup) -> str | None:
 
     # Prefer a row whose last-event cell mentions ptsos.
     for pid, last_event in candidates:
-        if "ptsos" in last_event:
+        if re.search(r"\bptsos\b", last_event):
             return pid
     # Fall back to a unique id if there's only one candidate.
     unique = {pid for pid, _ in candidates}
@@ -372,21 +372,31 @@ def merge_match_perspectives(rows: Iterable[ProfileMatch]) -> list[MergedMatch]:
 
 
 def _flip_game_score(score: str) -> str:
-    """'2-3' -> '3-2', etc. Empty string passes through unchanged."""
-    if "-" not in score:
-        return score
-    a, _, b = score.partition("-")
-    return f"{b}-{a}"
+    """'2-3' -> '3-2'. Returns empty string unchanged. Raises ValueError on malformed input."""
+    if score == "":
+        return ""
+    m = re.fullmatch(r"(\d+)-(\d+)", score)
+    if not m:
+        raise ValueError(f"unexpected game_score format: {score!r}")
+    return f"{m.group(2)}-{m.group(1)}"
 
 
 def scrape_all_players(
     fetcher: _FetcherProtocol,
     roster: list[str],
-) -> tuple[list[ProfileMatch], list[str]]:
-    """Resolve each magic.gg name to an mtgelo player_id, fetch their matches JSON,
-    and return (all_perspectives, unresolved_names)."""
+) -> tuple[list[ProfileMatch], list[str], int]:
+    """Resolve each magic.gg name, fetch matches JSON, dedupe.
+
+    Returns (all_perspectives, unresolved_names, count_unresolved_opponents).
+    The third return value is the number of distinct opponent player_ids that
+    appear in fetched matches but were never fetched themselves — i.e. potential
+    invisible-match cases.
+    """
     all_perspectives: list[ProfileMatch] = []
     unresolved: list[str] = []
+    fetched_ids: set[str] = set()
+    seen_opponent_ids: set[str] = set()
+
     for name in roster:
         try:
             pid = find_player_id(fetcher, name)
@@ -396,10 +406,16 @@ def scrape_all_players(
         if not pid:
             unresolved.append(name)
             continue
+        fetched_ids.add(pid)
         api_url = MATCHES_API_BASE.format(player_id=pid)
         body = fetcher.get(api_url)
-        all_perspectives.extend(parse_matches_json(body, player_name=name, player_id=pid))
-    return all_perspectives, unresolved
+        new_rows = parse_matches_json(body, player_name=name, player_id=pid)
+        all_perspectives.extend(new_rows)
+        for row in new_rows:
+            seen_opponent_ids.add(row.opponent_id)
+
+    unresolved_opponent_count = len(seen_opponent_ids - fetched_ids)
+    return all_perspectives, unresolved, unresolved_opponent_count
 
 
 def write_matches_csv(matches: list[MergedMatch], out_path: Path) -> None:
@@ -448,7 +464,7 @@ def main() -> None:
 
     fetcher = Fetcher(cache_dir=Path(args.cache_dir), min_interval_s=1.0)
     roster = _load_roster(Path(args.decks))
-    perspectives, unresolved = scrape_all_players(fetcher, roster)
+    perspectives, unresolved, unresolved_opp_count = scrape_all_players(fetcher, roster)
     merged = merge_match_perspectives(perspectives)
     write_matches_csv(merged, Path(args.out))
 
@@ -457,7 +473,9 @@ def main() -> None:
         print(f"WARNING: {len(unresolved)} players could not be resolved on mtgeloproject:")
         for n in unresolved:
             print(f"  - {n}")
-        print("Note: their matches still appear from opponents' fetches as single-sided rows.")
+        print(f"  ({unresolved_opp_count} distinct opponent IDs appear in fetched matches "
+              f"but were never fetched directly; their matches against each other are invisible.)")
+        print("Note: single-sided rows are still captured via opponents' fetches.")
 
 
 if __name__ == "__main__":
