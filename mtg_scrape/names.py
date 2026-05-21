@@ -12,9 +12,9 @@ from pathlib import Path
 from typing import Callable, Iterable
 
 
-def normalize(name: str) -> str:
+def normalize(name: str | None) -> str:
     """Fold case, swap "Last, First" -> "First Last", strip accents, collapse whitespace."""
-    if name is None:
+    if not name:
         return ""
     if "," in name:
         parts = [p.strip() for p in name.split(",", 1)]

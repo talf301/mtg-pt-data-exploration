@@ -867,7 +867,7 @@ magic_gg_name,mtgelo_name
 - [ ] **Step 5: Run tests, confirm pass**
 
 Run: `.venv/bin/pytest tests/test_names.py -v`
-Expected: 8 passed.
+Expected: 9 passed.
 
 - [ ] **Step 6: Commit**
 
