@@ -74,3 +74,66 @@ def test_to_long_frame_buckets_non_top_n_to_other():
     assert len(rogue_rows) == 1
     assert rogue_rows.iloc[0]["opp_arch"] == "IzzetProwess"
     assert rogue_rows.iloc[0]["result"] == "L"  # flipped from input W
+
+
+import math
+from mtg_scrape.build_matchup_matrix import compute_matrix, compute_win_rate
+
+
+def test_compute_matrix_counts_wins_and_losses_per_cell():
+    m = _matchups([
+        ("IzzetProwess", "Mono-Green", "W"),
+        ("IzzetProwess", "Mono-Green", "W"),
+        ("IzzetProwess", "Mono-Green", "L"),
+    ])
+    long = to_long_frame(m, top_n=["IzzetProwess", "Mono-Green"])
+    wins, losses = compute_matrix(long, ordered_labels=["IzzetProwess", "Mono-Green"])
+
+    assert wins.loc["IzzetProwess", "Mono-Green"] == 2
+    assert losses.loc["IzzetProwess", "Mono-Green"] == 1
+    assert wins.loc["Mono-Green", "IzzetProwess"] == 1
+    assert losses.loc["Mono-Green", "IzzetProwess"] == 2
+
+
+def test_compute_matrix_diagonal_is_zero():
+    m = _matchups([("IzzetProwess", "IzzetProwess", "W")])
+    long = to_long_frame(m, top_n=["IzzetProwess"])
+    wins, losses = compute_matrix(long, ordered_labels=["IzzetProwess"])
+    assert wins.loc["IzzetProwess", "IzzetProwess"] == 1
+    assert losses.loc["IzzetProwess", "IzzetProwess"] == 1
+
+
+def test_compute_win_rate_off_diagonal_is_wins_over_total():
+    wins = pd.DataFrame([[0, 2], [1, 0]], index=["A", "B"], columns=["A", "B"])
+    losses = pd.DataFrame([[0, 1], [2, 0]], index=["A", "B"], columns=["A", "B"])
+    wr = compute_win_rate(wins, losses)
+    assert wr.loc["A", "B"] == pytest.approx(2 / 3)
+    assert wr.loc["B", "A"] == pytest.approx(1 / 3)
+
+
+def test_compute_win_rate_diagonal_is_nan():
+    wins = pd.DataFrame([[5, 2], [1, 5]], index=["A", "B"], columns=["A", "B"])
+    losses = pd.DataFrame([[5, 1], [2, 5]], index=["A", "B"], columns=["A", "B"])
+    wr = compute_win_rate(wins, losses)
+    assert math.isnan(wr.loc["A", "A"])
+    assert math.isnan(wr.loc["B", "B"])
+
+
+def test_off_diagonal_symmetry_invariant():
+    m = _matchups([
+        ("IzzetProwess", "Mono-Green", "W"),
+        ("IzzetProwess", "Mono-Green", "L"),
+        ("IzzetProwess", "Mono-Green", "W"),
+    ])
+    labels = ["IzzetProwess", "Mono-Green"]
+    long = to_long_frame(m, top_n=labels)
+    wins, losses = compute_matrix(long, ordered_labels=labels)
+    wr = compute_win_rate(wins, losses)
+    assert wr.loc["IzzetProwess", "Mono-Green"] + wr.loc["Mono-Green", "IzzetProwess"] == pytest.approx(1.0)
+
+
+def test_compute_win_rate_low_sample_cell_is_nan_when_zero_games():
+    wins = pd.DataFrame([[0, 0], [0, 0]], index=["A", "B"], columns=["A", "B"])
+    losses = pd.DataFrame([[0, 0], [0, 0]], index=["A", "B"], columns=["A", "B"])
+    wr = compute_win_rate(wins, losses)
+    assert math.isnan(wr.loc["A", "B"])

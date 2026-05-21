@@ -58,3 +58,37 @@ def to_long_frame(
         "result": decided["result"].map(_FLIP),
     })
     return pd.concat([forward, mirror], ignore_index=True)
+
+
+def compute_matrix(
+    long: pd.DataFrame,
+    ordered_labels: list[str],
+) -> tuple[pd.DataFrame, pd.DataFrame]:
+    """Compute square wins and losses DataFrames indexed by (my_arch, opp_arch).
+
+    Returns two DataFrames with rows=cols=ordered_labels (filling 0 where no data exists).
+    """
+    decided = long[long["result"].isin(("W", "L"))]
+    wins_pivot = (
+        decided[decided["result"] == "W"]
+        .groupby(["my_arch", "opp_arch"]).size()
+        .unstack(fill_value=0)
+    )
+    losses_pivot = (
+        decided[decided["result"] == "L"]
+        .groupby(["my_arch", "opp_arch"]).size()
+        .unstack(fill_value=0)
+    )
+    wins = wins_pivot.reindex(index=ordered_labels, columns=ordered_labels, fill_value=0)
+    losses = losses_pivot.reindex(index=ordered_labels, columns=ordered_labels, fill_value=0)
+    return wins.astype(int), losses.astype(int)
+
+
+def compute_win_rate(wins: pd.DataFrame, losses: pd.DataFrame) -> pd.DataFrame:
+    """Compute the win rate matrix; suppress the diagonal to NaN."""
+    total = wins + losses
+    wr = wins.where(total > 0).astype(float).div(total.where(total > 0))
+    for label in wr.index:
+        if label in wr.columns:
+            wr.loc[label, label] = float("nan")
+    return wr
