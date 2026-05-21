@@ -28,3 +28,33 @@ def map_to_bucket(top_n: list[str], other_label: str = OTHER_LABEL):
         return archetype if archetype in top_set else other_label
 
     return _bucket
+
+
+_FLIP = {"W": "L", "L": "W"}
+
+
+def to_long_frame(
+    matchups: pd.DataFrame,
+    top_n: list[str],
+    other_label: str = OTHER_LABEL,
+) -> pd.DataFrame:
+    """Expand each matchups row into two long-frame rows (one per perspective).
+
+    - Drops draws (result == "D").
+    - Maps non-top-N archetypes to other_label.
+    - Output columns: my_arch, opp_arch, result.
+    """
+    bucket = map_to_bucket(top_n, other_label=other_label)
+    decided = matchups[matchups["result"].isin(_FLIP)].copy()
+
+    forward = pd.DataFrame({
+        "my_arch": decided["archetype_a"].map(bucket),
+        "opp_arch": decided["archetype_b"].map(bucket),
+        "result": decided["result"],
+    })
+    mirror = pd.DataFrame({
+        "my_arch": decided["archetype_b"].map(bucket),
+        "opp_arch": decided["archetype_a"].map(bucket),
+        "result": decided["result"].map(_FLIP),
+    })
+    return pd.concat([forward, mirror], ignore_index=True)

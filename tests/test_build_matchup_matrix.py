@@ -30,3 +30,47 @@ def test_map_to_bucket_returns_other_for_non_top_n():
     assert bucket("IzzetProwess") == "IzzetProwess"
     assert bucket("Mono-Green") == "Mono-Green"
     assert bucket("RogueDeck") == "Other"
+
+
+from mtg_scrape.build_matchup_matrix import to_long_frame
+
+
+def test_to_long_frame_doubles_row_count():
+    m = _matchups([
+        ("IzzetProwess", "Mono-Green", "W"),
+        ("Mono-Green", "IzzetProwess", "L"),
+    ])
+    long = to_long_frame(m, top_n=["IzzetProwess", "Mono-Green"])
+    assert len(long) == 4  # 2 input rows × 2 perspectives
+
+
+def test_to_long_frame_flips_result_on_mirror_row():
+    m = _matchups([("IzzetProwess", "Mono-Green", "W")])
+    long = to_long_frame(m, top_n=["IzzetProwess", "Mono-Green"])
+    # Forward perspective: my_arch=IzzetProwess, result=W
+    forward = long[long["my_arch"] == "IzzetProwess"].iloc[0]
+    assert forward["opp_arch"] == "Mono-Green"
+    assert forward["result"] == "W"
+    # Mirror perspective: my_arch=Mono-Green, result flipped to L
+    mirror = long[long["my_arch"] == "Mono-Green"].iloc[0]
+    assert mirror["opp_arch"] == "IzzetProwess"
+    assert mirror["result"] == "L"
+
+
+def test_to_long_frame_drops_draws():
+    m = _matchups([
+        ("IzzetProwess", "Mono-Green", "W"),
+        ("IzzetProwess", "Mono-Green", "D"),  # this one drops both perspectives
+    ])
+    long = to_long_frame(m, top_n=["IzzetProwess", "Mono-Green"])
+    assert len(long) == 2  # only the W row's two perspectives survive
+    assert "D" not in long["result"].values
+
+
+def test_to_long_frame_buckets_non_top_n_to_other():
+    m = _matchups([("IzzetProwess", "RogueDeck", "W")])
+    long = to_long_frame(m, top_n=["IzzetProwess"])
+    rogue_rows = long[long["my_arch"] == "Other"]
+    assert len(rogue_rows) == 1
+    assert rogue_rows.iloc[0]["opp_arch"] == "IzzetProwess"
+    assert rogue_rows.iloc[0]["result"] == "L"  # flipped from input W
