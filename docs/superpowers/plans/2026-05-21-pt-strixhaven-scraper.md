@@ -1648,7 +1648,7 @@ git commit -m "Scrape and dedupe mtgeloproject matches end-to-end"
 
 ## Task 9: Join decks + matches into final matchups dataset
 
-Filter to Standard rounds, join archetypes + Elo onto each match, derive `players.csv`, surface any unresolved names loudly.
+**Revised after the Task 5 spike.** matches.csv now has the JSON-API schema (str `round`, lowercase `format`, columns `player_a_name`/`player_b_name`, both sides' elo_pre/post/delta, etc.). This task filters to Standard rounds, resolves player names to canonical magic.gg form, joins archetypes per side, derives `players.csv` with starting Elos, and surfaces any unresolved names.
 
 **Files:**
 - Create: `mtg_scrape/build_matchups.py`
@@ -1659,6 +1659,7 @@ Filter to Standard rounds, join archetypes + Elo onto each match, derive `player
 Create `tests/test_build_matchups.py`:
 
 ```python
+import math
 import pandas as pd
 import pytest
 
@@ -1669,112 +1670,153 @@ def _decks_df():
     return pd.DataFrame([
         {"player_name": "Nathan Steuer", "archetype_magicgg": "Selesnya Landfall",
          "mainboard": "", "sideboard": ""},
-        {"player_name": "Reid Duke", "archetype_magicgg": "Izzet Prowess",
+        {"player_name": "Christoffer Larsen", "archetype_magicgg": "Izzet Prowess",
          "mainboard": "", "sideboard": ""},
     ])
 
 
 def _matches_df():
-    # round 1: Booster Draft (should be filtered out)
-    # round 4: Standard
+    """matches.csv with new JSON-API schema: round is str, format is lowercase,
+    columns player_a_name/player_b_name carry whichever form (canonical or raw mtgelo).
+    """
     return pd.DataFrame([
-        {"round": 1, "format": "Booster Draft",
-         "player_a": "Nathan Steuer", "player_b": "Reid Duke", "result": "W",
-         "game_score": "2-0",
-         "player_a_elo_pre": 1900.0, "player_a_elo_delta": 5.0,
-         "player_b_elo_pre": 1850.0, "player_b_elo_delta": -5.0},
-        {"round": 4, "format": "Standard",
-         "player_a": "Nathan Steuer", "player_b": "Reid Duke", "result": "W",
-         "game_score": "2-1",
-         "player_a_elo_pre": 1905.0, "player_a_elo_delta": 7.0,
-         "player_b_elo_pre": 1845.0, "player_b_elo_delta": -7.0},
+        # round "1": Booster Draft (lowercase, should be filtered out)
+        {"match_id": 1, "round": "1", "format": "draft", "table": 1,
+         "player_a_id": "wrr61zbv", "player_a_name": "Christoffer Larsen",
+         "player_b_id": "zz14clya", "player_b_name": "Nathan Steuer",
+         "result": "L", "game_score": "1-2",
+         "player_a_elo_pre": 1850.0, "player_a_elo_post": 1840.0, "player_a_elo_delta": -10.0,
+         "player_b_elo_pre": 1900.0, "player_b_elo_post": 1910.0, "player_b_elo_delta": 10.0},
+        # round "4": Standard, lowercase
+        {"match_id": 2, "round": "4", "format": "standard", "table": 1,
+         "player_a_id": "wrr61zbv", "player_a_name": "Christoffer Larsen",
+         "player_b_id": "zz14clya", "player_b_name": "Nathan Steuer",
+         "result": "W", "game_score": "2-1",
+         "player_a_elo_pre": 1845.0, "player_a_elo_post": 1860.0, "player_a_elo_delta": 15.0,
+         "player_b_elo_pre": 1910.0, "player_b_elo_post": 1895.0, "player_b_elo_delta": -15.0},
     ])
 
 
-def test_filters_to_standard_rounds():
+def test_filters_to_standard_rounds_only():
     out = build_matchups(_decks_df(), _matches_df())
-    assert list(out["round"]) == [4], "Booster Draft round should be excluded"
+    assert list(out["round"]) == ["4"], "draft round should be excluded"
 
 
 def test_joins_archetype_per_side():
     out = build_matchups(_decks_df(), _matches_df())
     row = out.iloc[0]
-    assert row["archetype_a"] == "Selesnya Landfall"
-    assert row["archetype_b"] == "Izzet Prowess"
+    assert row["archetype_a"] == "Izzet Prowess"      # Christoffer Larsen
+    assert row["archetype_b"] == "Selesnya Landfall"  # Nathan Steuer
 
 
 def test_joins_elo_per_side():
     out = build_matchups(_decks_df(), _matches_df())
     row = out.iloc[0]
-    assert row["elo_a_pre"] == 1905.0
-    assert row["elo_b_pre"] == 1845.0
+    assert row["elo_a_pre"] == 1845.0
+    assert row["elo_b_pre"] == 1910.0
+
+
+def test_keeps_result_and_game_score_from_player_a_perspective():
+    out = build_matchups(_decks_df(), _matches_df())
+    row = out.iloc[0]
+    assert row["result"] == "W"
+    assert row["game_score"] == "2-1"
+
+
+def test_resolves_mtgelo_last_comma_first_to_canonical():
+    """matches.csv from Task 8 may carry raw 'Last, First' for unfetched players."""
+    decks = pd.DataFrame([
+        {"player_name": "Nathan Steuer", "archetype_magicgg": "Selesnya Landfall",
+         "mainboard": "", "sideboard": ""},
+        {"player_name": "Christoffer Larsen", "archetype_magicgg": "Izzet Prowess",
+         "mainboard": "", "sideboard": ""},
+    ])
+    matches = pd.DataFrame([
+        {"match_id": 1, "round": "4", "format": "standard", "table": 1,
+         "player_a_id": "wrr61zbv", "player_a_name": "Larsen, Christoffer",  # raw mtgelo form
+         "player_b_id": "zz14clya", "player_b_name": "Steuer, Nathan",
+         "result": "W", "game_score": "2-1",
+         "player_a_elo_pre": 1845.0, "player_a_elo_post": 1860.0, "player_a_elo_delta": 15.0,
+         "player_b_elo_pre": 1910.0, "player_b_elo_post": 1895.0, "player_b_elo_delta": -15.0},
+    ])
+    out = build_matchups(decks, matches)
+    row = out.iloc[0]
+    assert row["player_a"] == "Christoffer Larsen"  # canonical magic.gg form
+    assert row["player_b"] == "Nathan Steuer"
+    assert row["archetype_a"] == "Izzet Prowess"
 
 
 def test_raises_on_unresolved_name():
     matches = _matches_df().copy()
-    matches.loc[1, "player_b"] = "Ghost Player"  # not in decks
+    matches.loc[1, "player_b_name"] = "Ghost, Player"  # not in decks
     with pytest.raises(UnresolvedNamesError) as exc:
         build_matchups(_decks_df(), matches)
-    assert "Ghost Player" in str(exc.value)
-
-
-def test_normalization_resolves_accent_mismatches():
-    # decks.csv has accents; matches.csv (from mtgelo) doesn't. No override needed,
-    # because normalize() folds accents.
-    decks = pd.DataFrame([
-        {"player_name": "Javier Domínguez", "archetype_magicgg": "Esper Control",
-         "mainboard": "", "sideboard": ""},
-        {"player_name": "Reid Duke", "archetype_magicgg": "Izzet Prowess",
-         "mainboard": "", "sideboard": ""},
-    ])
-    matches = pd.DataFrame([
-        {"round": 4, "format": "Standard",
-         "player_a": "Javier Dominguez", "player_b": "Reid Duke", "result": "W",
-         "game_score": "2-1",
-         "player_a_elo_pre": 1800.0, "player_a_elo_delta": 5.0,
-         "player_b_elo_pre": 1820.0, "player_b_elo_delta": -5.0},
-    ])
-    out = build_matchups(decks, matches)
-    assert out.iloc[0]["player_a"] == "Javier Domínguez"  # canonical spelling restored
+    assert "Ghost" in str(exc.value)
 
 
 def test_overrides_resolve_substantial_name_mismatches():
-    # magic.gg has "Sam Black"; mtgelo says "Samuel Black". User adds override.
     decks = pd.DataFrame([
         {"player_name": "Sam Black", "archetype_magicgg": "Mardu Sacrifice",
          "mainboard": "", "sideboard": ""},
-        {"player_name": "Reid Duke", "archetype_magicgg": "Izzet Prowess",
+        {"player_name": "Christoffer Larsen", "archetype_magicgg": "Izzet Prowess",
          "mainboard": "", "sideboard": ""},
     ])
     matches = pd.DataFrame([
-        {"round": 4, "format": "Standard",
-         "player_a": "Samuel Black", "player_b": "Reid Duke", "result": "W",
-         "game_score": "2-1",
-         "player_a_elo_pre": 1800.0, "player_a_elo_delta": 5.0,
-         "player_b_elo_pre": 1820.0, "player_b_elo_delta": -5.0},
+        {"match_id": 1, "round": "4", "format": "standard", "table": 1,
+         "player_a_id": "wrr61zbv", "player_a_name": "Christoffer Larsen",
+         "player_b_id": "xxxxxxxx", "player_b_name": "Black, Samuel",  # mtgelo's name
+         "result": "W", "game_score": "2-1",
+         "player_a_elo_pre": 1845.0, "player_a_elo_post": 1860.0, "player_a_elo_delta": 15.0,
+         "player_b_elo_pre": 1800.0, "player_b_elo_post": 1785.0, "player_b_elo_delta": -15.0},
     ])
     overrides = {"samuel black": "sam black"}  # as load_overrides would return
     out = build_matchups(decks, matches, overrides=overrides)
-    assert out.iloc[0]["player_a"] == "Sam Black"
-    assert out.iloc[0]["archetype_a"] == "Mardu Sacrifice"
+    assert out.iloc[0]["player_b"] == "Sam Black"
+    assert out.iloc[0]["archetype_b"] == "Mardu Sacrifice"
 
 
-def test_derive_players_extracts_starting_elo():
+def test_derive_players_starting_elo_uses_earliest_round():
+    """starting_elo == player's elo_pre in their lowest-numeric-round match."""
     matches = pd.DataFrame([
-        {"round": 1, "format": "Booster Draft",
-         "player_a": "Nathan Steuer", "player_b": "Reid Duke", "result": "W",
-         "game_score": "2-0",
-         "player_a_elo_pre": 1900.0, "player_a_elo_delta": 5.0,
-         "player_b_elo_pre": 1850.0, "player_b_elo_delta": -5.0},
-        {"round": 4, "format": "Standard",
-         "player_a": "Nathan Steuer", "player_b": "Reid Duke", "result": "W",
-         "game_score": "2-1",
-         "player_a_elo_pre": 1905.0, "player_a_elo_delta": 7.0,
-         "player_b_elo_pre": 1845.0, "player_b_elo_delta": -7.0},
+        {"match_id": 1, "round": "1", "format": "draft", "table": 1,
+         "player_a_id": "wrr61zbv", "player_a_name": "Christoffer Larsen",
+         "player_b_id": "zz14clya", "player_b_name": "Nathan Steuer",
+         "result": "L", "game_score": "1-2",
+         "player_a_elo_pre": 1850.0, "player_a_elo_post": 1840.0, "player_a_elo_delta": -10.0,
+         "player_b_elo_pre": 1900.0, "player_b_elo_post": 1910.0, "player_b_elo_delta": 10.0},
+        {"match_id": 2, "round": "4", "format": "standard", "table": 1,
+         "player_a_id": "wrr61zbv", "player_a_name": "Christoffer Larsen",
+         "player_b_id": "zz14clya", "player_b_name": "Nathan Steuer",
+         "result": "W", "game_score": "2-1",
+         "player_a_elo_pre": 1845.0, "player_a_elo_post": 1860.0, "player_a_elo_delta": 15.0,
+         "player_b_elo_pre": 1910.0, "player_b_elo_post": 1895.0, "player_b_elo_delta": -15.0},
     ])
     players = derive_players(matches)
-    nathan = players.set_index("player_name").loc["Nathan Steuer"]
-    assert nathan["starting_elo"] == 1900.0  # min round = round 1
+    by_name = players.set_index("player_name")
+    assert by_name.loc["Christoffer Larsen", "starting_elo"] == 1850.0  # round "1" elo_pre
+    assert by_name.loc["Nathan Steuer", "starting_elo"] == 1900.0
+
+
+def test_derive_players_sorts_string_rounds_numerically():
+    """Round '10' must sort after round '2', not before (lexicographic would say otherwise)."""
+    matches = pd.DataFrame([
+        # Player only appears in rounds '2' and '10'; starting_elo should be from round '2'
+        {"match_id": 1, "round": "10", "format": "standard", "table": 1,
+         "player_a_id": "wrr61zbv", "player_a_name": "Christoffer Larsen",
+         "player_b_id": "zz14clya", "player_b_name": "Nathan Steuer",
+         "result": "W", "game_score": "2-1",
+         "player_a_elo_pre": 1900.0, "player_a_elo_post": 1910.0, "player_a_elo_delta": 10.0,
+         "player_b_elo_pre": 1850.0, "player_b_elo_post": 1840.0, "player_b_elo_delta": -10.0},
+        {"match_id": 2, "round": "2", "format": "standard", "table": 1,
+         "player_a_id": "wrr61zbv", "player_a_name": "Christoffer Larsen",
+         "player_b_id": "zz14clya", "player_b_name": "Nathan Steuer",
+         "result": "L", "game_score": "0-2",
+         "player_a_elo_pre": 1860.0, "player_a_elo_post": 1850.0, "player_a_elo_delta": -10.0,
+         "player_b_elo_pre": 1810.0, "player_b_elo_post": 1820.0, "player_b_elo_delta": 10.0},
+    ])
+    players = derive_players(matches)
+    by_name = players.set_index("player_name")
+    assert by_name.loc["Christoffer Larsen", "starting_elo"] == 1860.0  # round "2" elo_pre, not "10"
 ```
 
 - [ ] **Step 2: Run, confirm fails**
@@ -1785,7 +1827,14 @@ Expected: FAIL — module not found.
 - [ ] **Step 3: Implement `mtg_scrape/build_matchups.py`**
 
 ```python
-"""Join decks.csv and matches.csv into matchups.csv (constructed-only) and players.csv."""
+"""Join decks.csv and matches.csv into matchups.csv (constructed-only) and players.csv.
+
+matches.csv schema (from Task 8) uses string rounds, lowercase format ("standard"/"draft"),
+and names in either canonical magic.gg form (for fetched players) or raw mtgelo
+"Last, First" form (for unfetched players, where they appear only as opponents).
+The resolver folds accents, case, whitespace, and comma-swap to bring everything
+back to canonical magic.gg names.
+"""
 from __future__ import annotations
 
 import argparse
@@ -1800,6 +1849,15 @@ class UnresolvedNamesError(RuntimeError):
     """Raised when matches reference players that cannot be resolved to a decklist owner."""
 
 
+def _round_sort_key(r) -> tuple[int, int]:
+    """Sort key for string rounds: numeric swiss rounds first (in order), then top cut Q/S/F."""
+    s = str(r)
+    try:
+        return (0, int(s))
+    except ValueError:
+        return (1, {"Q": 1, "S": 2, "F": 3}.get(s, 99))
+
+
 def build_matchups(
     decks: pd.DataFrame,
     matches: pd.DataFrame,
@@ -1808,8 +1866,8 @@ def build_matchups(
     """Filter matches to Standard rounds and join archetype + Elo per side.
 
     Names in matches (from mtgeloproject) are resolved to canonical decks-side names
-    via accent/case folding (always) and the overrides map (if substantial differences
-    exist). Raises UnresolvedNamesError if any resolution fails.
+    via accent/case/comma folding (always) and the overrides map (if substantial
+    differences exist). Raises UnresolvedNamesError if any resolution fails.
     """
     if overrides is None:
         overrides = {}
@@ -1818,12 +1876,12 @@ def build_matchups(
     resolver = build_resolver(canonical, overrides)
 
     working = matches.copy()
-    working["player_a_resolved"] = working["player_a"].apply(resolver)
-    working["player_b_resolved"] = working["player_b"].apply(resolver)
+    working["player_a_resolved"] = working["player_a_name"].apply(resolver)
+    working["player_b_resolved"] = working["player_b_name"].apply(resolver)
 
     unresolved = sorted(
-        set(working.loc[working["player_a_resolved"].isna(), "player_a"].unique())
-        | set(working.loc[working["player_b_resolved"].isna(), "player_b"].unique())
+        set(working.loc[working["player_a_resolved"].isna(), "player_a_name"].unique())
+        | set(working.loc[working["player_b_resolved"].isna(), "player_b_name"].unique())
     )
     if unresolved:
         raise UnresolvedNamesError(
@@ -1836,34 +1894,44 @@ def build_matchups(
     working["player_b"] = working["player_b_resolved"]
     working = working.drop(columns=["player_a_resolved", "player_b_resolved"])
 
-    standard = working[working["format"] == "Standard"].copy()
+    standard = working[working["format"] == "standard"].copy()
 
     decks_idx = decks.set_index("player_name")
     standard["archetype_a"] = standard["player_a"].map(decks_idx["archetype_magicgg"])
     standard["archetype_b"] = standard["player_b"].map(decks_idx["archetype_magicgg"])
     standard = standard.rename(columns={
         "player_a_elo_pre": "elo_a_pre",
+        "player_a_elo_post": "elo_a_post",
         "player_b_elo_pre": "elo_b_pre",
+        "player_b_elo_post": "elo_b_post",
     })
 
     return standard[[
-        "round", "player_a", "archetype_a", "elo_a_pre",
-        "player_b", "archetype_b", "elo_b_pre", "result",
+        "match_id", "round",
+        "player_a", "archetype_a", "elo_a_pre", "elo_a_post",
+        "player_b", "archetype_b", "elo_b_pre", "elo_b_post",
+        "result", "game_score",
     ]].reset_index(drop=True)
 
 
 def derive_players(matches: pd.DataFrame) -> pd.DataFrame:
-    """Extract per-player starting Elo: their pre-match Elo in the earliest round they played."""
-    a = matches[["round", "player_a", "player_a_elo_pre"]].rename(
-        columns={"player_a": "player_name", "player_a_elo_pre": "elo_pre"})
-    b = matches[["round", "player_b", "player_b_elo_pre"]].rename(
-        columns={"player_b": "player_name", "player_b_elo_pre": "elo_pre"})
+    """Per-player starting_elo: elo_pre in their earliest round.
+
+    Rounds are strings; sort numeric-where-possible, putting top-cut Q/S/F after swiss.
+    """
+    a = matches[["round", "player_a_name", "player_a_elo_pre"]].rename(
+        columns={"player_a_name": "player_name", "player_a_elo_pre": "elo_pre"})
+    b = matches[["round", "player_b_name", "player_b_elo_pre"]].rename(
+        columns={"player_b_name": "player_name", "player_b_elo_pre": "elo_pre"})
     long = pd.concat([a, b], ignore_index=True).dropna(subset=["elo_pre"])
     if long.empty:
         return pd.DataFrame(columns=["player_name", "starting_elo"])
-    idx = long.groupby("player_name")["round"].idxmin()
-    starting = long.loc[idx, ["player_name", "elo_pre"]].rename(columns={"elo_pre": "starting_elo"})
-    return starting.reset_index(drop=True)
+
+    long["_sort"] = long["round"].apply(_round_sort_key)
+    long_sorted = long.sort_values("_sort")
+    first_per_player = long_sorted.drop_duplicates(subset=["player_name"], keep="first")
+    return first_per_player[["player_name", "elo_pre"]].rename(
+        columns={"elo_pre": "starting_elo"}).reset_index(drop=True)
 
 
 def main() -> None:
@@ -1876,7 +1944,7 @@ def main() -> None:
     args = parser.parse_args()
 
     decks = pd.read_csv(args.decks)
-    matches = pd.read_csv(args.matches)
+    matches = pd.read_csv(args.matches, dtype={"round": str})  # rounds may look numeric
     overrides = load_overrides(Path(args.overrides))
 
     matchups = build_matchups(decks, matches, overrides=overrides)
@@ -1895,7 +1963,7 @@ if __name__ == "__main__":
 - [ ] **Step 4: Run tests, confirm pass**
 
 Run: `.venv/bin/pytest tests/test_build_matchups.py -v`
-Expected: 7 passed.
+Expected: 9 passed.
 
 - [ ] **Step 5: Run end-to-end against real data**
 
