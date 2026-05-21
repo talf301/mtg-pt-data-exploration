@@ -1114,207 +1114,468 @@ git commit -m "Parse mtgeloproject matches API JSON for PT Strixhaven"
 
 ---
 
-## Task 8: mtgeloproject orchestrator — search, walk, dedupe
+## Task 8: mtgeloproject orchestrator — name → player_id, walk profiles via JSON API, dedupe by match_id
 
-Add the orchestration layer to `matches_mtgelo.py`: name → profile URL search, walk all 325 profiles, dedupe matches across both players' views, write `data/matches.csv`.
+**Revised after the Task 5 spike.** Adds three pieces on top of Task 7's parser:
+
+1. `find_player_id(fetcher, magic_gg_name)` — hits `https://mtgeloproject.net/search/<Last>/<First>` and parses the response HTML. Two response shapes:
+   - **Auto-redirect / exact match:** the response IS the profile page (Fetcher follows the 30x). HTML contains a single `<astro-island ... component-url="/_astro/Profile...">` whose `props` attribute is HTML-entity-escaped JSON containing a `playerid` field.
+   - **Disambiguation page:** the response is a search-results page with one or more `<a href="/profile/<id>">` links inside the main content. Each row has a "last event" cell; for PT Strixhaven players that should be `"ptsos"`. Pick that row.
+2. `merge_match_perspectives` — dedupe by `match_id` (stable integer from the API) into one `MergedMatch` per match. Two perspectives → both sides' Elos populated. One perspective → other side's `elo_pre` from `opp_data.start`, other side's `elo_post`/`elo_delta` = NaN.
+3. Orchestration in `main()`: read the magic.gg roster from `data/decks.csv`, resolve each name to an mtgelo player_id, fetch each player's matches JSON via the API, parse + dedupe, write `data/matches.csv`.
 
 **Files:**
 - Modify: `mtg_scrape/matches_mtgelo.py`
 - Modify: `tests/test_matches_mtgelo.py`
 
-- [ ] **Step 1: Write failing tests for the dedupe logic**
+- [ ] **Step 1: Write failing tests**
 
 Append to `tests/test_matches_mtgelo.py`:
 
 ```python
-from mtg_scrape.matches_mtgelo import merge_match_perspectives, MergedMatch, ProfileMatch
+import math
+from mtg_scrape.matches_mtgelo import (
+    MergedMatch,
+    find_player_id,
+    merge_match_perspectives,
+    split_name_for_search,
+)
+
+SEARCH_AUTOREDIRECT_FIXTURE = Path(__file__).parent / "fixtures" / "mtgelo" / "search-results-steuer.html"
+SEARCH_DISAMBIG_FIXTURE = Path(__file__).parent / "fixtures" / "mtgelo" / "search-results-larsen.html"
 
 
-def _pm(player, opp, result, elo_pre, elo_delta, round_=4, fmt="Standard"):
+# ----- split_name_for_search -----
+
+def test_split_name_for_search_simple():
+    assert split_name_for_search("Nathan Steuer") == ("Steuer", "Nathan")
+
+
+def test_split_name_for_search_with_middle():
+    # last word is surname; everything before is first/middle
+    assert split_name_for_search("Jose Maria Rodriguez") == ("Rodriguez", "Jose Maria")
+
+
+def test_split_name_for_search_handles_accents():
+    # don't strip accents on the search URL; pass through verbatim
+    assert split_name_for_search("Javier Domínguez") == ("Domínguez", "Javier")
+
+
+# ----- find_player_id -----
+
+class _FakeFetcher:
+    """Maps URLs to fixture HTML for offline testing of find_player_id."""
+    def __init__(self, url_map: dict[str, str]):
+        self._map = url_map
+    def get(self, url: str) -> str:
+        return self._map[url]
+
+
+def test_find_player_id_auto_redirect_extracts_playerid_from_astro_island():
+    fetcher = _FakeFetcher({
+        "https://mtgeloproject.net/search/Steuer/Nathan":
+            SEARCH_AUTOREDIRECT_FIXTURE.read_text(encoding="utf-8"),
+    })
+    assert find_player_id(fetcher, "Nathan Steuer") == "zz14clya"
+
+
+def test_find_player_id_disambig_picks_ptsos_row():
+    fetcher = _FakeFetcher({
+        "https://mtgeloproject.net/search/Larsen/Christoffer":
+            SEARCH_DISAMBIG_FIXTURE.read_text(encoding="utf-8"),
+    })
+    # Christoffer Larsen's profile is wrr61zbv per the spike notes; he played PT SOS.
+    assert find_player_id(fetcher, "Christoffer Larsen") == "wrr61zbv"
+
+
+# ----- merge_match_perspectives -----
+
+def _pm(player_name, player_id, opponent_name, opponent_id, result, elo_pre, elo_post,
+        opp_elo_pre, match_id=1, round_="4", fmt="standard", game_score="2-1", table=1):
     return ProfileMatch(
-        player_name=player, round_number=round_, format_tag=fmt,
-        opponent_name=opp, result=result, game_score="2-1",
-        elo_pre=elo_pre, elo_delta=elo_delta, event_name="Pro Tour Secrets of Strixhaven",
+        player_name=player_name, player_id=player_id, match_id=match_id,
+        round=round_, table=table, format=fmt,
+        opponent_name=opponent_name, opponent_id=opponent_id,
+        result=result, game_score=game_score,
+        elo_pre=elo_pre, elo_post=elo_post, elo_delta=round(elo_post - elo_pre, 4),
+        opp_elo_pre=opp_elo_pre,
     )
 
 
-def test_merge_two_perspectives_into_one_row():
-    a = _pm("Nathan Steuer", "Reid Duke", "W", 1850.0, +12.0)
-    b = _pm("Reid Duke", "Nathan Steuer", "L", 1830.0, -12.0)
-
+def test_merge_two_perspectives_dedupes_by_match_id():
+    a = _pm("Nathan Steuer", "zz14clya", "Larsen, Christoffer", "wrr61zbv",
+            "W", 1850.0, 1862.0, 1830.0)
+    b = _pm("Christoffer Larsen", "wrr61zbv", "Steuer, Nathan", "zz14clya",
+            "L", 1830.0, 1818.0, 1850.0)
     merged = merge_match_perspectives([a, b])
-
     assert len(merged) == 1
     m = merged[0]
-    assert {m.player_a, m.player_b} == {"Nathan Steuer", "Reid Duke"}
-    if m.player_a == "Nathan Steuer":
-        assert m.result == "W"
-        assert m.player_a_elo_pre == 1850.0
-        assert m.player_b_elo_pre == 1830.0
-    else:
-        assert m.result == "L"
+    # Order by player_id ascending: "wrr61zbv" < "zz14clya" -> Larsen is player_a
+    assert m.player_a_id == "wrr61zbv"
+    assert m.player_b_id == "zz14clya"
+    assert m.player_a_name == "Christoffer Larsen"  # canonical magic.gg form
+    assert m.player_b_name == "Nathan Steuer"
+    assert m.result == "L"  # Larsen lost
+    assert m.player_a_elo_pre == 1830.0
+    assert m.player_a_elo_post == 1818.0
+    assert m.player_b_elo_pre == 1850.0
+    assert m.player_b_elo_post == 1862.0
 
 
-def test_merge_single_sided_keeps_other_side_null():
-    only = _pm("Nathan Steuer", "Unknown Player", "W", 1850.0, +12.0)
+def test_merge_single_sided_fills_opponent_elo_pre_from_opp_data():
+    # Only fetched Steuer's perspective; Larsen was unresolved.
+    only = _pm("Nathan Steuer", "zz14clya", "Larsen, Christoffer", "wrr61zbv",
+               "W", 1850.0, 1862.0, 1830.0)
     merged = merge_match_perspectives([only])
     assert len(merged) == 1
     m = merged[0]
-    assert m.player_a_elo_pre == 1850.0
-    assert m.player_b_elo_pre is None
+    # player_a still ordered by id ascending; Larsen's id wins
+    assert m.player_a_id == "wrr61zbv"
+    assert m.player_a_name == "Larsen, Christoffer"  # raw mtgelo form, since we never fetched
+    assert m.player_a_elo_pre == 1830.0  # from opp_data.start
+    assert math.isnan(m.player_a_elo_post)
+    assert math.isnan(m.player_a_elo_delta)
+    assert m.player_b_id == "zz14clya"
+    assert m.player_b_name == "Nathan Steuer"
+    assert m.player_b_elo_pre == 1850.0
+    assert m.player_b_elo_post == 1862.0
+    assert m.result == "L"  # flipped from Steuer's "W" because Larsen is player_a
 
 
-def test_merge_orders_players_alphabetically():
-    a = _pm("Nathan Steuer", "Reid Duke", "W", 1850.0, +12.0)
-    b = _pm("Reid Duke", "Nathan Steuer", "L", 1830.0, -12.0)
-    merged = merge_match_perspectives([a, b])
-    assert merged[0].player_a == "Nathan Steuer"  # alphabetically first
-    assert merged[0].player_b == "Reid Duke"
+def test_merge_carries_match_metadata():
+    a = _pm("Nathan Steuer", "zz14clya", "Larsen, Christoffer", "wrr61zbv",
+            "W", 1850.0, 1862.0, 1830.0, match_id=4015653, round_="F",
+            fmt="standard", game_score="3-2", table=1)
+    merged = merge_match_perspectives([a])
+    m = merged[0]
+    assert m.match_id == 4015653
+    assert m.round == "F"
+    assert m.format == "standard"
+    assert m.table == 1
+    # game_score is from player_a's perspective; player_a is Larsen, who lost 2-3
+    assert m.game_score == "2-3"
 ```
 
 - [ ] **Step 2: Run, confirm fails**
 
 Run: `.venv/bin/pytest tests/test_matches_mtgelo.py -v`
-Expected: 3 new failures (existing 3 still pass).
+Expected: ~8 new failures (existing 10 still pass).
 
-- [ ] **Step 3: Add `MergedMatch` and `merge_match_perspectives` to `matches_mtgelo.py`**
+- [ ] **Step 3: Implement the new functions and dataclass in `mtg_scrape/matches_mtgelo.py`**
 
-Append to `mtg_scrape/matches_mtgelo.py`:
+Append to `mtg_scrape/matches_mtgelo.py` (keep all existing code; this is additive):
 
 ```python
-@dataclass
-class MergedMatch:
-    round_number: int
-    format_tag: str
-    player_a: str               # alphabetically first
-    player_b: str
-    result: str                 # from player_a's perspective: "W"/"L"/"D"
-    game_score: str | None
-    player_a_elo_pre: float | None
-    player_a_elo_delta: float | None
-    player_b_elo_pre: float | None
-    player_b_elo_delta: float | None
+import csv
+import html
+import json
+import math
+import re
+from pathlib import Path
+from urllib.parse import quote
+from dataclasses import dataclass
+from typing import Iterable, Protocol
+
+from bs4 import BeautifulSoup
+
+# Add at top with other imports (after the existing 'import json' from Task 7) ---
+# Pre-existing imports remain; the lines above are new ones to add.
 
 
-def merge_match_perspectives(rows: Iterable[ProfileMatch]) -> list[MergedMatch]:
-    """Dedupe matches that appear once per player perspective into single rows.
+SEARCH_BASE = "https://mtgeloproject.net/search/{last}/{first}"
+MATCHES_API_BASE = "https://mtgeloproject.net/api/players/{player_id}/matches"
 
-    Key: (round_number, frozenset({player_name, opponent_name})). For each key,
-    we may see 0, 1, or 2 perspectives. Each perspective contributes one side's
-    Elo info; the result column flips with which side is player_a.
+
+class _FetcherProtocol(Protocol):
+    def get(self, url: str) -> str: ...
+
+
+def split_name_for_search(name: str) -> tuple[str, str]:
+    """Split a 'First [Middle] Last' magic.gg name into (Last, First+Middle).
+
+    mtgeloproject's search route is /search/<LastName>/<FirstName>. Most PT
+    players have two-word names; for multi-word names we treat the trailing
+    word as the surname.
     """
-    # Group by key
-    by_key: dict[tuple[int, frozenset[str]], list[ProfileMatch]] = {}
-    for r in rows:
-        key = (r.round_number, frozenset({r.player_name, r.opponent_name}))
-        by_key.setdefault(key, []).append(r)
+    parts = name.strip().split()
+    if len(parts) < 2:
+        raise ValueError(f"need at least two words to split as Last/First: {name!r}")
+    last = parts[-1]
+    first = " ".join(parts[:-1])
+    return last, first
 
-    merged: list[MergedMatch] = []
-    for key, perspectives in by_key.items():
-        names = sorted({n for r in perspectives for n in (r.player_name, r.opponent_name)})
-        if len(names) == 1:
-            # Self-match? Shouldn't happen; skip defensively.
+
+def find_player_id(fetcher: _FetcherProtocol, magic_gg_name: str) -> str | None:
+    """Resolve a magic.gg-canonical name to an mtgeloproject player_id.
+
+    Strategy:
+      - GET /search/<Last>/<First>. Two response shapes:
+      - Auto-redirect: response IS the profile page. Look for the <astro-island
+        component-url="/_astro/Profile..."> and parse its props.
+      - Disambig page: parse <a href="/profile/<id>"> rows. Prefer the row whose
+        adjacent "last event" cell text contains "ptsos".
+
+    Returns the 8-char player_id, or None if we can't decide.
+    """
+    last, first = split_name_for_search(magic_gg_name)
+    url = SEARCH_BASE.format(last=quote(last), first=quote(first))
+    response_html = fetcher.get(url)
+    soup = BeautifulSoup(response_html, "lxml")
+
+    # Case 1: auto-redirected to the profile page.
+    pid = _extract_playerid_from_astro_island(soup)
+    if pid:
+        return pid
+
+    # Case 2: disambiguation table.
+    return _pick_disambig_row(soup)
+
+
+def _extract_playerid_from_astro_island(soup: BeautifulSoup) -> str | None:
+    """Look for an <astro-island> whose component-url references the Profile bundle.
+
+    The element has a `props` attribute holding HTML-entity-escaped JSON; one of
+    the keys is `playerid`. Returns the id string or None.
+    """
+    for island in soup.find_all("astro-island"):
+        comp = island.get("component-url", "")
+        if "/_astro/Profile" not in comp:
             continue
-        player_a, player_b = names[0], names[1]
-
-        from_a = next((r for r in perspectives if r.player_name == player_a), None)
-        from_b = next((r for r in perspectives if r.player_name == player_b), None)
-        sample = from_a or from_b
-        assert sample is not None
-
-        # Determine result from player_a's perspective:
-        if from_a is not None:
-            result_a = from_a.result
-        else:
-            # Only have from_b; flip B's result
-            assert from_b is not None
-            result_a = {"W": "L", "L": "W", "D": "D"}[from_b.result]
-
-        merged.append(MergedMatch(
-            round_number=sample.round_number,
-            format_tag=sample.format_tag,
-            player_a=player_a,
-            player_b=player_b,
-            result=result_a,
-            game_score=sample.game_score,
-            player_a_elo_pre=from_a.elo_pre if from_a else None,
-            player_a_elo_delta=from_a.elo_delta if from_a else None,
-            player_b_elo_pre=from_b.elo_pre if from_b else None,
-            player_b_elo_delta=from_b.elo_delta if from_b else None,
-        ))
-    merged.sort(key=lambda m: (m.round_number, m.player_a))
-    return merged
-```
-
-- [ ] **Step 4: Run dedupe tests, confirm pass**
-
-Run: `.venv/bin/pytest tests/test_matches_mtgelo.py -v`
-Expected: 6 passed.
-
-- [ ] **Step 5: Add search-by-name resolver and end-to-end scrape**
-
-Append to `mtg_scrape/matches_mtgelo.py`:
-
-```python
-# URL patterns confirmed during Task 5 spike. Update these if mtgeloproject changes its URLs.
-SEARCH_URL = "https://mtgeloproject.net/search?name={query}"
-PROFILE_LINK_SELECTOR = "a.player-link"  # update per spike findings
-
-
-def find_profile_url(fetcher: Fetcher, player_name: str) -> str | None:
-    """Use mtgeloproject's name search to find a player's profile URL.
-
-    Returns absolute URL or None if no match.
-    """
-    html = fetcher.get(SEARCH_URL.format(query=quote_plus(player_name)))
-    soup = BeautifulSoup(html, "lxml")
-    target_norm = normalize(player_name)
-    for link in soup.select(PROFILE_LINK_SELECTOR):
-        label = link.get_text(strip=True)
-        if normalize(label) == target_norm:
-            href = link.get("href", "")
-            if href.startswith("http"):
-                return href
-            return f"https://mtgeloproject.net{href}"
-    # Fallback: take the first result if its normalized name matches.
-    first = soup.select_one(PROFILE_LINK_SELECTOR)
-    if first and normalize(first.get_text(strip=True)) == target_norm:
-        href = first.get("href", "")
-        return href if href.startswith("http") else f"https://mtgeloproject.net{href}"
+        props_raw = island.get("props", "")
+        if not props_raw:
+            continue
+        try:
+            props = json.loads(html.unescape(props_raw))
+        except json.JSONDecodeError:
+            continue
+        pid = _walk_for_key(props, "playerid")
+        if isinstance(pid, str) and re.fullmatch(r"[a-z0-9]{8}", pid):
+            return pid
+        # Astro often wraps values as [type, value]
+        if isinstance(pid, list) and len(pid) == 2 and isinstance(pid[1], str):
+            return pid[1]
     return None
 
 
-def scrape_all_profiles(fetcher: Fetcher, players: list[str]) -> tuple[list[ProfileMatch], list[str]]:
-    """Walk every player's profile, return (all_perspectives, unresolved_names)."""
+def _walk_for_key(obj: object, key: str) -> object:
+    if isinstance(obj, dict):
+        if key in obj:
+            return obj[key]
+        for v in obj.values():
+            found = _walk_for_key(v, key)
+            if found is not None:
+                return found
+    elif isinstance(obj, list):
+        for v in obj:
+            found = _walk_for_key(v, key)
+            if found is not None:
+                return found
+    return None
+
+
+def _pick_disambig_row(soup: BeautifulSoup) -> str | None:
+    """Look for /profile/<id> anchor whose row references the ptsos event."""
+    candidates: list[tuple[str, str]] = []  # (player_id, last_event_text)
+    for a in soup.select("a[href^='/profile/']"):
+        href = a.get("href", "")
+        m = re.match(r"/profile/([a-z0-9]{8})", href)
+        if not m:
+            continue
+        pid = m.group(1)
+        # Last-event hint: walk the enclosing row to find a cell containing
+        # "ptsos". We don't assume a specific column index.
+        row = a.find_parent("tr") or a.find_parent("li") or a.parent
+        row_text = row.get_text(" ", strip=True).lower() if row else ""
+        candidates.append((pid, row_text))
+
+    # Prefer a row that mentions "ptsos" (most-recent-event hint).
+    for pid, text in candidates:
+        if "ptsos" in text:
+            return pid
+    # Otherwise fall back to the single unique id, if there's only one.
+    unique = {pid for pid, _ in candidates}
+    if len(unique) == 1:
+        return unique.pop()
+    return None
+
+
+@dataclass
+class MergedMatch:
+    """One dedupe-merged match across both player perspectives.
+
+    player_a is the side whose mtgeloproject player_id sorts lexicographically
+    first; player_b is the other. Naming side: if we fetched that player, the
+    canonical magic.gg name; otherwise the raw 'Last, First' from mtgelo.
+    """
+    match_id: int
+    round: str
+    format: str
+    table: int | None
+    player_a_id: str
+    player_a_name: str
+    player_b_id: str
+    player_b_name: str
+    result: str               # W/L/D from player_a's perspective
+    game_score: str           # from player_a's perspective ("a-b")
+    player_a_elo_pre: float
+    player_a_elo_post: float
+    player_a_elo_delta: float
+    player_b_elo_pre: float
+    player_b_elo_post: float
+    player_b_elo_delta: float
+
+
+def merge_match_perspectives(rows: Iterable[ProfileMatch]) -> list[MergedMatch]:
+    """Group ProfileMatch records by match_id, merging one or two perspectives per match.
+
+    Determines player_a/player_b by lexicographic comparison of mtgeloproject player_ids.
+    Result, game_score, and Elo info reflect player_a's perspective; for fields the
+    unfetched side leaves unfilled (elo_post / elo_delta), uses NaN.
+    """
+    by_match: dict[int, list[ProfileMatch]] = {}
+    for r in rows:
+        by_match.setdefault(r.match_id, []).append(r)
+
+    merged: list[MergedMatch] = []
+    nan = float("nan")
+    for match_id, perspectives in by_match.items():
+        # Each perspective contributes its own player_id + opponent_id.
+        # The two player_ids identify both sides; pick the lower as player_a.
+        ids = sorted({pid for r in perspectives for pid in (r.player_id, r.opponent_id)})
+        if len(ids) != 2:
+            continue  # corrupt; skip defensively
+        a_id, b_id = ids[0], ids[1]
+
+        # Find a ProfileMatch fetched from each side, if any
+        from_a = next((r for r in perspectives if r.player_id == a_id), None)
+        from_b = next((r for r in perspectives if r.player_id == b_id), None)
+        if from_a is None and from_b is None:
+            continue
+
+        if from_a is not None:
+            a_name = from_a.player_name
+        else:
+            # only have B's perspective; B saw A as the opponent
+            a_name = from_b.opponent_name  # raw "Last, First"
+
+        if from_b is not None:
+            b_name = from_b.player_name
+        else:
+            b_name = from_a.opponent_name
+
+        # Result + game_score from player_a's perspective
+        if from_a is not None:
+            result_a = from_a.result
+            game_score_a = from_a.game_score
+        else:
+            result_a = {"W": "L", "L": "W", "D": "D"}[from_b.result]
+            game_score_a = _flip_game_score(from_b.game_score)
+
+        # Elo numbers
+        if from_a is not None:
+            a_elo_pre = from_a.elo_pre
+            a_elo_post = from_a.elo_post
+            a_elo_delta = from_a.elo_delta
+        else:
+            a_elo_pre = from_b.opp_elo_pre  # B's view of A's pre-Elo
+            a_elo_post = nan
+            a_elo_delta = nan
+
+        if from_b is not None:
+            b_elo_pre = from_b.elo_pre
+            b_elo_post = from_b.elo_post
+            b_elo_delta = from_b.elo_delta
+        else:
+            b_elo_pre = from_a.opp_elo_pre
+            b_elo_post = nan
+            b_elo_delta = nan
+
+        sample = from_a or from_b
+        merged.append(MergedMatch(
+            match_id=match_id,
+            round=sample.round,
+            format=sample.format,
+            table=sample.table,
+            player_a_id=a_id,
+            player_a_name=a_name,
+            player_b_id=b_id,
+            player_b_name=b_name,
+            result=result_a,
+            game_score=game_score_a,
+            player_a_elo_pre=a_elo_pre,
+            player_a_elo_post=a_elo_post,
+            player_a_elo_delta=a_elo_delta,
+            player_b_elo_pre=b_elo_pre,
+            player_b_elo_post=b_elo_post,
+            player_b_elo_delta=b_elo_delta,
+        ))
+    merged.sort(key=lambda m: (m.round, m.player_a_id))
+    return merged
+
+
+def _flip_game_score(score: str) -> str:
+    """'2-3' -> '3-2', etc. Empty string passes through."""
+    if "-" not in score:
+        return score
+    a, _, b = score.partition("-")
+    return f"{b}-{a}"
+```
+
+- [ ] **Step 4: Run tests, confirm pass**
+
+Run: `.venv/bin/pytest tests/test_matches_mtgelo.py -v`
+Expected: 18 passed (10 existing + 8 new).
+
+If `find_player_id` fails on the fixtures, open the relevant `tests/fixtures/mtgelo/search-results-*.html` and inspect the actual `<astro-island>` props or disambig markup. The spike notes captured the field name as `playerid`. If a fixture uses a different shape, adjust the parser to match what the fixture actually contains (treat fixture as ground truth).
+
+- [ ] **Step 5: Add orchestrator (`main()` + helpers)**
+
+Append:
+
+```python
+def scrape_all_players(
+    fetcher: _FetcherProtocol,
+    roster: list[str],
+) -> tuple[list[ProfileMatch], list[str]]:
+    """Resolve each magic.gg name to an mtgelo player_id, fetch their matches JSON,
+    and return (all_perspectives, unresolved_names)."""
     all_perspectives: list[ProfileMatch] = []
     unresolved: list[str] = []
-    for name in players:
-        url = find_profile_url(fetcher, name)
-        if not url:
+    for name in roster:
+        pid = find_player_id(fetcher, name)
+        if not pid:
             unresolved.append(name)
             continue
-        html = fetcher.get(url)
-        all_perspectives.extend(parse_profile_matches(html, event_filter=EVENT_NAME))
+        api_url = MATCHES_API_BASE.format(player_id=pid)
+        body = fetcher.get(api_url)
+        all_perspectives.extend(parse_matches_json(body, player_name=name, player_id=pid))
     return all_perspectives, unresolved
 
 
 def write_matches_csv(matches: list[MergedMatch], out_path: Path) -> None:
     out_path.parent.mkdir(parents=True, exist_ok=True)
+
+    def _fmt(v: float) -> str:
+        if isinstance(v, float) and math.isnan(v):
+            return ""
+        return str(v)
+
     with out_path.open("w", encoding="utf-8", newline="") as f:
         w = csv.writer(f)
         w.writerow([
-            "round", "format", "player_a", "player_b", "result", "game_score",
-            "player_a_elo_pre", "player_a_elo_delta",
-            "player_b_elo_pre", "player_b_elo_delta",
+            "match_id", "round", "format", "table",
+            "player_a_id", "player_a_name", "player_b_id", "player_b_name",
+            "result", "game_score",
+            "player_a_elo_pre", "player_a_elo_post", "player_a_elo_delta",
+            "player_b_elo_pre", "player_b_elo_post", "player_b_elo_delta",
         ])
         for m in matches:
             w.writerow([
-                m.round_number, m.format_tag, m.player_a, m.player_b, m.result,
-                m.game_score or "",
-                m.player_a_elo_pre if m.player_a_elo_pre is not None else "",
-                m.player_a_elo_delta if m.player_a_elo_delta is not None else "",
-                m.player_b_elo_pre if m.player_b_elo_pre is not None else "",
-                m.player_b_elo_delta if m.player_b_elo_delta is not None else "",
+                m.match_id, m.round, m.format, "" if m.table is None else m.table,
+                m.player_a_id, m.player_a_name, m.player_b_id, m.player_b_name,
+                m.result, m.game_score,
+                _fmt(m.player_a_elo_pre), _fmt(m.player_a_elo_post), _fmt(m.player_a_elo_delta),
+                _fmt(m.player_b_elo_pre), _fmt(m.player_b_elo_post), _fmt(m.player_b_elo_delta),
             ])
 
 
@@ -1324,6 +1585,9 @@ def _load_roster(decks_path: Path) -> list[str]:
 
 
 def main() -> None:
+    from mtg_scrape.fetch import Fetcher
+    import argparse
+
     parser = argparse.ArgumentParser()
     parser.add_argument("--cache-dir", default="cache")
     parser.add_argument("--decks", default="data/decks.csv")
@@ -1332,7 +1596,7 @@ def main() -> None:
 
     fetcher = Fetcher(cache_dir=Path(args.cache_dir), min_interval_s=1.0)
     roster = _load_roster(Path(args.decks))
-    perspectives, unresolved = scrape_all_profiles(fetcher, roster)
+    perspectives, unresolved = scrape_all_players(fetcher, roster)
     merged = merge_match_perspectives(perspectives)
     write_matches_csv(merged, Path(args.out))
 
@@ -1341,11 +1605,28 @@ def main() -> None:
         print(f"WARNING: {len(unresolved)} players could not be resolved on mtgeloproject:")
         for n in unresolved:
             print(f"  - {n}")
-        print("Add overrides to data/name_overrides.csv and re-run.")
+        print("Note: their matches still appear from opponents' fetches as single-sided rows.")
 
 
 if __name__ == "__main__":
     main()
+```
+
+- [ ] **Step 6: Run end-to-end against live mtgeloproject**
+
+Run: `.venv/bin/python -m mtg_scrape.matches_mtgelo`
+
+Expected runtime: ~325 search GETs + ~325 API GETs × 1 req/sec ≈ 12 minutes on first run; subsequent runs use cache and finish in seconds. Console output should print roughly: "Wrote N matches to data/matches.csv" where N is in the low thousands (8 Standard rounds × ~325 players ÷ 2 ≈ 1300 Standard matches, plus similar for draft + top 8 = ~2200-2600 total).
+
+Inspect `data/matches.csv` for sanity: row count, format column shows mostly "standard" and "draft", a finals row (round="F") with `match_id=4015653` and both players named/identified.
+
+If `unresolved` is non-empty, that's expected for a few players (typos, accent edge cases). Note them; Task 9 will surface them again at join time and we'll add overrides as needed.
+
+- [ ] **Step 7: Commit**
+
+```
+git add mtg_scrape/matches_mtgelo.py tests/test_matches_mtgelo.py data/matches.csv
+git commit -m "Orchestrate mtgelo search + matches API + per-match dedupe"
 ```
 
 - [ ] **Step 6: Run the scraper end-to-end**
