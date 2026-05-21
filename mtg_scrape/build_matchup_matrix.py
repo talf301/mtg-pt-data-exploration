@@ -92,3 +92,50 @@ def compute_win_rate(wins: pd.DataFrame, losses: pd.DataFrame) -> pd.DataFrame:
         if label in wr.columns:
             wr.loc[label, label] = float("nan")
     return wr
+
+
+from pathlib import Path
+
+EM_DASH = "—"  # U+2014
+
+
+def _format_cell_string(wins: int, losses: int, is_diagonal: bool) -> str:
+    if is_diagonal or (wins + losses) == 0:
+        return EM_DASH
+    pct = round(100 * wins / (wins + losses))
+    return f"{pct}% ({wins}-{losses})"
+
+
+def _format_counts_string(wins: int, losses: int, is_diagonal: bool) -> str:
+    if is_diagonal:
+        return EM_DASH
+    return f"{wins}-{losses}"
+
+
+def render_csvs(wins: pd.DataFrame, losses: pd.DataFrame, out_dir: Path) -> None:
+    """Emit matchup_matrix.csv, matchup_matrix_numeric.csv, and matchup_matrix_counts.csv."""
+    out_dir = Path(out_dir)
+    out_dir.mkdir(parents=True, exist_ok=True)
+
+    labels = list(wins.index)
+    is_diag = lambda r, c: r == c
+
+    string_df = pd.DataFrame(
+        {col: [
+            _format_cell_string(int(wins.loc[row, col]), int(losses.loc[row, col]), is_diag(row, col))
+            for row in labels
+        ] for col in labels},
+        index=labels,
+    )
+    counts_df = pd.DataFrame(
+        {col: [
+            _format_counts_string(int(wins.loc[row, col]), int(losses.loc[row, col]), is_diag(row, col))
+            for row in labels
+        ] for col in labels},
+        index=labels,
+    )
+    numeric_df = compute_win_rate(wins, losses)
+
+    string_df.to_csv(out_dir / "matchup_matrix.csv")
+    numeric_df.to_csv(out_dir / "matchup_matrix_numeric.csv")
+    counts_df.to_csv(out_dir / "matchup_matrix_counts.csv")

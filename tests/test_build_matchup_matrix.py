@@ -137,3 +137,63 @@ def test_compute_win_rate_low_sample_cell_is_nan_when_zero_games():
     losses = pd.DataFrame([[0, 0], [0, 0]], index=["A", "B"], columns=["A", "B"])
     wr = compute_win_rate(wins, losses)
     assert math.isnan(wr.loc["A", "B"])
+
+
+from pathlib import Path
+from mtg_scrape.build_matchup_matrix import render_csvs
+
+
+def test_render_csvs_writes_three_files(tmp_path: Path):
+    wins = pd.DataFrame([[0, 2], [1, 0]], index=["A", "B"], columns=["A", "B"])
+    losses = pd.DataFrame([[0, 1], [2, 0]], index=["A", "B"], columns=["A", "B"])
+
+    render_csvs(wins, losses, out_dir=tmp_path)
+
+    assert (tmp_path / "matchup_matrix.csv").exists()
+    assert (tmp_path / "matchup_matrix_numeric.csv").exists()
+    assert (tmp_path / "matchup_matrix_counts.csv").exists()
+
+
+def test_string_csv_cells_format_percent_and_wl(tmp_path: Path):
+    wins = pd.DataFrame([[0, 2], [1, 0]], index=["A", "B"], columns=["A", "B"])
+    losses = pd.DataFrame([[0, 1], [2, 0]], index=["A", "B"], columns=["A", "B"])
+
+    render_csvs(wins, losses, out_dir=tmp_path)
+
+    df = pd.read_csv(tmp_path / "matchup_matrix.csv", index_col=0)
+    assert df.loc["A", "B"] == "67% (2-1)"
+    assert df.loc["B", "A"] == "33% (1-2)"
+    assert df.loc["A", "A"] == "—"
+    assert df.loc["B", "B"] == "—"
+
+
+def test_counts_csv_uses_wl_string(tmp_path: Path):
+    wins = pd.DataFrame([[0, 2], [1, 0]], index=["A", "B"], columns=["A", "B"])
+    losses = pd.DataFrame([[0, 1], [2, 0]], index=["A", "B"], columns=["A", "B"])
+
+    render_csvs(wins, losses, out_dir=tmp_path)
+
+    df = pd.read_csv(tmp_path / "matchup_matrix_counts.csv", index_col=0)
+    assert df.loc["A", "B"] == "2-1"
+    assert df.loc["A", "A"] == "—"
+
+
+def test_numeric_csv_has_win_rate_floats(tmp_path: Path):
+    wins = pd.DataFrame([[0, 2], [1, 0]], index=["A", "B"], columns=["A", "B"])
+    losses = pd.DataFrame([[0, 1], [2, 0]], index=["A", "B"], columns=["A", "B"])
+
+    render_csvs(wins, losses, out_dir=tmp_path)
+
+    df = pd.read_csv(tmp_path / "matchup_matrix_numeric.csv", index_col=0)
+    assert df.loc["A", "B"] == pytest.approx(2 / 3)
+    assert pd.isna(df.loc["A", "A"])
+
+
+def test_empty_cell_renders_as_em_dash_in_string(tmp_path: Path):
+    wins = pd.DataFrame([[0, 0], [0, 0]], index=["A", "B"], columns=["A", "B"])
+    losses = pd.DataFrame([[0, 0], [0, 0]], index=["A", "B"], columns=["A", "B"])
+
+    render_csvs(wins, losses, out_dir=tmp_path)
+
+    df = pd.read_csv(tmp_path / "matchup_matrix.csv", index_col=0)
+    assert df.loc["A", "B"] == "—"
