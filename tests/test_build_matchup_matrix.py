@@ -237,3 +237,21 @@ def test_end_to_end_smoke_produces_all_four_files(tmp_path: Path):
     df = pd.read_csv(out_dir / "matchup_matrix.csv", index_col=0)
     assert df.loc["IzzetProwess", "Mono-Green"] == "67% (2-1)"
     assert df.loc["Mono-Green", "IzzetProwess"] == "33% (1-2)"
+
+
+from mtg_scrape.build_matchup_matrix import _assert_symmetric
+
+
+def test_assert_symmetric_passes_on_symmetric_matrix():
+    # 2 W and 1 L from A's perspective; 1 W and 2 L from B's perspective. Matches.
+    wins = pd.DataFrame([[0, 2], [1, 0]], index=["A", "B"], columns=["A", "B"])
+    losses = pd.DataFrame([[0, 1], [2, 0]], index=["A", "B"], columns=["A", "B"])
+    _assert_symmetric(wins, losses)  # no exception
+
+
+def test_assert_symmetric_raises_on_asymmetric_matrix():
+    # wins(A,B)=2 but losses(B,A)=3 → inconsistent. Should raise.
+    wins = pd.DataFrame([[0, 2], [1, 0]], index=["A", "B"], columns=["A", "B"])
+    losses = pd.DataFrame([[0, 1], [3, 0]], index=["A", "B"], columns=["A", "B"])
+    with pytest.raises(AssertionError, match="symmetry violated"):
+        _assert_symmetric(wins, losses)

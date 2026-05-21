@@ -94,6 +94,25 @@ def compute_win_rate(wins: pd.DataFrame, losses: pd.DataFrame) -> pd.DataFrame:
     return wr
 
 
+def _assert_symmetric(wins: pd.DataFrame, losses: pd.DataFrame) -> None:
+    """Runtime invariant check: every off-diagonal pair (A,B) and (B,A) is consistent.
+
+    By construction, the wins-at-(A,B) cell equals losses-at-(B,A); raise AssertionError if not.
+    Diagonal cells are unconstrained and ignored.
+    """
+    labels = list(wins.index)
+    for i, a in enumerate(labels):
+        for j, b in enumerate(labels):
+            if i == j:
+                continue
+            w_ab = int(wins.loc[a, b])
+            l_ba = int(losses.loc[b, a])
+            assert w_ab == l_ba, (
+                f"matchup-matrix symmetry violated for ({a}, {b}): "
+                f"wins[{a},{b}]={w_ab} but losses[{b},{a}]={l_ba}"
+            )
+
+
 from pathlib import Path
 
 EM_DASH = "—"  # U+2014
@@ -236,6 +255,7 @@ def main(argv: list[str] | None = None) -> None:
     labels = top_n_archetypes(matchups, n=args.top_n) + [OTHER_LABEL]
     long = to_long_frame(matchups, top_n=labels[:-1])  # exclude OTHER from the top-N list
     wins, losses = compute_matrix(long, ordered_labels=labels)
+    _assert_symmetric(wins, losses)
 
     out_dir = Path(args.out_dir)
     render_csvs(wins, losses, out_dir=out_dir)
