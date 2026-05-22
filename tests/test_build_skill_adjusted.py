@@ -169,3 +169,42 @@ def test_summary_overperforming_deck_has_positive_residual():
     summary = compute_archetype_summary(long).set_index("archetype")
     assert summary.loc["IzzetProwess", "residual"] > 0.5  # observed 100%, expected ~14%
     assert summary.loc["Mono-Green", "residual"] < -0.5
+
+
+from pathlib import Path
+from mtg_scrape.build_skill_adjusted import render_csv
+
+
+def test_render_csv_writes_file_sorted_by_residual_desc(tmp_path: Path):
+    summary = pd.DataFrame([
+        {"archetype": "A", "games": 10, "observed_wins": 5, "observed_losses": 5,
+         "observed_wr": 0.5, "expected_wins": 4.0, "expected_losses": 6.0,
+         "expected_wr": 0.4, "residual": 0.10},
+        {"archetype": "B", "games": 10, "observed_wins": 5, "observed_losses": 5,
+         "observed_wr": 0.5, "expected_wins": 6.0, "expected_losses": 4.0,
+         "expected_wr": 0.6, "residual": -0.10},
+        {"archetype": "C", "games": 10, "observed_wins": 5, "observed_losses": 5,
+         "observed_wr": 0.5, "expected_wins": 5.0, "expected_losses": 5.0,
+         "expected_wr": 0.5, "residual": 0.0},
+    ])
+    out = tmp_path / "archetype_skill_adjusted.csv"
+    render_csv(summary, out)
+    assert out.exists()
+    df = pd.read_csv(out)
+    # Sorted by residual descending: A (+0.10), C (0.0), B (-0.10)
+    assert list(df["archetype"]) == ["A", "C", "B"]
+
+
+def test_render_csv_preserves_all_columns(tmp_path: Path):
+    summary = pd.DataFrame([{
+        "archetype": "A", "games": 10, "observed_wins": 5, "observed_losses": 5,
+        "observed_wr": 0.5, "expected_wins": 4.0, "expected_losses": 6.0,
+        "expected_wr": 0.4, "residual": 0.10,
+    }])
+    out = tmp_path / "summary.csv"
+    render_csv(summary, out)
+    df = pd.read_csv(out)
+    expected_cols = ["archetype", "games", "observed_wins", "observed_losses",
+                     "observed_wr", "expected_wins", "expected_losses",
+                     "expected_wr", "residual"]
+    assert list(df.columns) == expected_cols

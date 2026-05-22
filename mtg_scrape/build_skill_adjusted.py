@@ -99,3 +99,13 @@ def compute_archetype_summary(long: pd.DataFrame) -> pd.DataFrame:
         "expected_wins", "expected_losses", "expected_wr",
         "residual",
     ]]
+
+
+from pathlib import Path
+
+
+def render_csv(summary: pd.DataFrame, out_path: Path) -> None:
+    """Write the summary DataFrame to CSV, sorted by residual descending."""
+    out_path = Path(out_path)
+    out_path.parent.mkdir(parents=True, exist_ok=True)
+    summary.sort_values("residual", ascending=False).to_csv(out_path, index=False)
