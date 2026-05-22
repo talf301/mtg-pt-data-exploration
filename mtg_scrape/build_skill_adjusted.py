@@ -206,3 +206,70 @@ def _assert_zero_sum(summary: pd.DataFrame) -> None:
     assert math.isclose(exp_w, exp_l, abs_tol=1e-6), (
         f"expected not zero-sum: wins={exp_w}, losses={exp_l}"
     )
+
+
+import argparse
+
+from mtg_scrape.build_matchup_matrix import OTHER_LABEL, top_n_archetypes
+
+
+def main(argv: list[str] | None = None) -> None:
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--matchups", default="data/matchups.csv")
+    parser.add_argument("--out-dir", default="data")
+    parser.add_argument("--top-n", type=int, default=10)
+    args = parser.parse_args(argv)
+
+    matchups = pd.read_csv(args.matchups)
+    long = to_skill_long_frame(matchups)
+    summary = compute_archetype_summary(long)
+    _assert_zero_sum(summary)
+
+    # Pick the archetype subset for the PNG: top-N by appearance in matchups,
+    # plus an "Other" bucket if any archetype outside the top-N has games.
+    top = top_n_archetypes(matchups, n=args.top_n)
+    png_subset = list(top)
+    extra_mask = ~summary["archetype"].isin(top)
+    if extra_mask.any():
+        other_summary = _aggregate_into_other(summary, extra_mask, top)
+        png_summary = pd.concat([summary[~extra_mask], other_summary], ignore_index=True)
+        png_subset = list(top) + [OTHER_LABEL]
+    else:
+        png_summary = summary
+
+    out_dir = Path(args.out_dir)
+    render_csv(summary, out_dir / "archetype_skill_adjusted.csv")
+    render_png(png_summary, archetypes=png_subset, out_path=out_dir / "archetype_skill_adjusted.png")
+
+    print(f"Wrote skill-adjusted artifacts to {out_dir}:")
+    print(f"  - archetype_skill_adjusted.csv  ({len(summary)} archetypes)")
+    print(f"  - archetype_skill_adjusted.png  (top-{args.top_n} + {OTHER_LABEL})")
+
+
+def _aggregate_into_other(summary: pd.DataFrame, mask: pd.Series, top: list[str]) -> pd.DataFrame:
+    """Collapse the rows in `summary[mask]` into a single 'Other' row."""
+    rest = summary[mask]
+    games = int(rest["games"].sum())
+    obs_w = int(rest["observed_wins"].sum())
+    obs_l = int(rest["observed_losses"].sum())
+    exp_w = float(rest["expected_wins"].sum())
+    exp_l = float(rest["expected_losses"].sum())
+    if games == 0:
+        return pd.DataFrame()
+    obs_wr = obs_w / games
+    exp_wr = exp_w / games
+    return pd.DataFrame([{
+        "archetype": OTHER_LABEL,
+        "games": games,
+        "observed_wins": obs_w,
+        "observed_losses": obs_l,
+        "observed_wr": obs_wr,
+        "expected_wins": exp_w,
+        "expected_losses": exp_l,
+        "expected_wr": exp_wr,
+        "residual": obs_wr - exp_wr,
+    }])
+
+
+if __name__ == "__main__":
+    main()
