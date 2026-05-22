@@ -85,3 +85,87 @@ def test_long_frame_mirror_perspective_flips_result_and_swaps_elos():
     assert mirror["result"] == "L"
     assert mirror["my_elo"] == 1700.0
     assert mirror["opp_elo"] == 1800.0
+
+
+from mtg_scrape.build_skill_adjusted import compute_archetype_summary
+
+
+def test_summary_has_one_row_per_archetype():
+    m = _matchups([
+        ("IzzetProwess", "Mono-Green", "W", 1800.0, 1700.0),
+        ("Mono-Green",   "IzzetProwess", "L", 1750.0, 1850.0),
+    ])
+    long = to_skill_long_frame(m)
+    summary = compute_archetype_summary(long)
+    assert set(summary["archetype"]) == {"IzzetProwess", "Mono-Green"}
+
+
+def test_summary_observed_counts():
+    # Izzet wins both. Each match contributes 1 observed W for Izzet, 1 L for Mono-Green.
+    m = _matchups([
+        ("IzzetProwess", "Mono-Green", "W", 1800.0, 1700.0),
+        ("Mono-Green",   "IzzetProwess", "L", 1750.0, 1850.0),
+    ])
+    long = to_skill_long_frame(m)
+    summary = compute_archetype_summary(long).set_index("archetype")
+    assert int(summary.loc["IzzetProwess", "observed_wins"]) == 2
+    assert int(summary.loc["IzzetProwess", "observed_losses"]) == 0
+    assert int(summary.loc["Mono-Green", "observed_wins"]) == 0
+    assert int(summary.loc["Mono-Green", "observed_losses"]) == 2
+
+
+def test_summary_expected_counts_at_tied_elo_match_observed():
+    """At zero Elo gap, expected = observed for each side."""
+    m = _matchups([
+        ("IzzetProwess", "Mono-Green", "W", 1800.0, 1800.0),
+        ("IzzetProwess", "Mono-Green", "W", 1800.0, 1800.0),
+    ])
+    long = to_skill_long_frame(m)
+    summary = compute_archetype_summary(long).set_index("archetype")
+    assert summary.loc["IzzetProwess", "expected_wins"] == pytest.approx(1.0)
+    assert summary.loc["IzzetProwess", "expected_losses"] == pytest.approx(1.0)
+    assert summary.loc["Mono-Green", "expected_wins"] == pytest.approx(1.0)
+    assert summary.loc["Mono-Green", "expected_losses"] == pytest.approx(1.0)
+
+
+def test_summary_residual_is_observed_minus_expected_winrate():
+    m = _matchups([
+        ("IzzetProwess", "Mono-Green", "W", 1800.0, 1800.0),
+        ("IzzetProwess", "Mono-Green", "W", 1800.0, 1800.0),
+    ])
+    long = to_skill_long_frame(m)
+    summary = compute_archetype_summary(long).set_index("archetype")
+    # Izzet observed 2-0 (100%), expected 50% -> residual +0.5
+    assert summary.loc["IzzetProwess", "observed_wr"] == pytest.approx(1.0)
+    assert summary.loc["IzzetProwess", "expected_wr"] == pytest.approx(0.5)
+    assert summary.loc["IzzetProwess", "residual"] == pytest.approx(0.5)
+
+
+def test_summary_zero_sum_invariant():
+    """Sum of observed wins == sum of observed losses == sum of expected wins == sum of expected losses."""
+    m = _matchups([
+        ("IzzetProwess", "Mono-Green", "W", 1850.0, 1700.0),
+        ("IzzetProwess", "Mono-Green", "L", 1700.0, 1850.0),
+        ("Selesnya",     "IzzetProwess", "W", 1750.0, 1750.0),
+    ])
+    long = to_skill_long_frame(m)
+    summary = compute_archetype_summary(long)
+    total_obs_w = summary["observed_wins"].sum()
+    total_obs_l = summary["observed_losses"].sum()
+    total_exp_w = summary["expected_wins"].sum()
+    total_exp_l = summary["expected_losses"].sum()
+    assert total_obs_w == total_obs_l == pytest.approx(total_exp_w) == pytest.approx(total_exp_l)
+
+
+def test_summary_overperforming_deck_has_positive_residual():
+    """A deck piloted by lower-Elo players that wins more than expected should have a positive residual."""
+    # Izzet at 1500 always beats Mono-Green at 1900 (huge skill gap, but Izzet wins all 3).
+    m = _matchups([
+        ("IzzetProwess", "Mono-Green", "W", 1500.0, 1900.0),
+        ("IzzetProwess", "Mono-Green", "W", 1500.0, 1900.0),
+        ("IzzetProwess", "Mono-Green", "W", 1500.0, 1900.0),
+    ])
+    long = to_skill_long_frame(m)
+    summary = compute_archetype_summary(long).set_index("archetype")
+    assert summary.loc["IzzetProwess", "residual"] > 0.5  # observed 100%, expected ~14%
+    assert summary.loc["Mono-Green", "residual"] < -0.5

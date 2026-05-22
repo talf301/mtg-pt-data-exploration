@@ -54,3 +54,48 @@ def to_skill_long_frame(matchups: pd.DataFrame) -> pd.DataFrame:
         "result":   m["result"].map(_FLIP).to_numpy(),
     })
     return pd.concat([forward, mirror], ignore_index=True)
+
+
+def compute_archetype_summary(long: pd.DataFrame) -> pd.DataFrame:
+    """Aggregate the long-frame into one row per archetype.
+
+    Output columns:
+      archetype, games, observed_wins, observed_losses, observed_wr,
+      expected_wins, expected_losses, expected_wr, residual
+    """
+    if long.empty:
+        return pd.DataFrame(columns=[
+            "archetype", "games",
+            "observed_wins", "observed_losses", "observed_wr",
+            "expected_wins", "expected_losses", "expected_wr",
+            "residual",
+        ])
+
+    work = long.copy()
+    work["p_win"] = work.apply(
+        lambda r: _elo_expected(r["my_elo"], r["opp_elo"]),
+        axis=1,
+    )
+    work["obs_w"] = (work["result"] == "W").astype(int)
+    work["obs_l"] = (work["result"] == "L").astype(int)
+    work["exp_w"] = work["p_win"]
+    work["exp_l"] = 1.0 - work["p_win"]
+
+    grouped = work.groupby("my_arch").agg(
+        games=("result", "size"),
+        observed_wins=("obs_w", "sum"),
+        observed_losses=("obs_l", "sum"),
+        expected_wins=("exp_w", "sum"),
+        expected_losses=("exp_l", "sum"),
+    ).reset_index().rename(columns={"my_arch": "archetype"})
+
+    grouped["observed_wr"] = grouped["observed_wins"] / grouped["games"]
+    grouped["expected_wr"] = grouped["expected_wins"] / grouped["games"]
+    grouped["residual"] = grouped["observed_wr"] - grouped["expected_wr"]
+
+    return grouped[[
+        "archetype", "games",
+        "observed_wins", "observed_losses", "observed_wr",
+        "expected_wins", "expected_losses", "expected_wr",
+        "residual",
+    ]]
