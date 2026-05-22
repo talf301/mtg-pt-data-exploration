@@ -186,3 +186,23 @@ def render_png(
     fig.tight_layout()
     fig.savefig(out_path, dpi=150)
     plt.close(fig)
+
+
+def _assert_zero_sum(summary: pd.DataFrame) -> None:
+    """Total observed wins must equal total observed losses, ditto for expected.
+
+    Every long-frame row contributes one win to one archetype and one loss to
+    another (or one expected-win and one expected-loss). Imbalance signals a
+    bug in the long-frame construction or the aggregation.
+    """
+    import math
+
+    obs_w = int(summary["observed_wins"].sum())
+    obs_l = int(summary["observed_losses"].sum())
+    exp_w = float(summary["expected_wins"].sum())
+    exp_l = float(summary["expected_losses"].sum())
+
+    assert obs_w == obs_l, f"observed not zero-sum: wins={obs_w}, losses={obs_l}"
+    assert math.isclose(exp_w, exp_l, abs_tol=1e-6), (
+        f"expected not zero-sum: wins={exp_w}, losses={exp_l}"
+    )

@@ -226,3 +226,32 @@ def test_render_png_writes_a_non_empty_file(tmp_path: Path):
     render_png(summary, archetypes=["A", "B"], out_path=out_path)
     assert out_path.exists()
     assert out_path.stat().st_size > 1000
+
+
+from mtg_scrape.build_skill_adjusted import _assert_zero_sum
+
+
+def test_assert_zero_sum_passes_on_consistent_summary():
+    summary = pd.DataFrame([
+        {"archetype": "A", "games": 10, "observed_wins": 6, "observed_losses": 4,
+         "observed_wr": 0.6, "expected_wins": 5.5, "expected_losses": 4.5,
+         "expected_wr": 0.55, "residual": 0.05},
+        {"archetype": "B", "games": 10, "observed_wins": 4, "observed_losses": 6,
+         "observed_wr": 0.4, "expected_wins": 4.5, "expected_losses": 5.5,
+         "expected_wr": 0.45, "residual": -0.05},
+    ])
+    _assert_zero_sum(summary)  # 6+4 == 4+6 observed; 5.5+4.5 == 4.5+5.5 expected
+
+
+def test_assert_zero_sum_raises_on_inconsistent_summary():
+    # Total observed wins = 7 but losses = 4 -> mismatch
+    summary = pd.DataFrame([
+        {"archetype": "A", "games": 10, "observed_wins": 7, "observed_losses": 3,
+         "observed_wr": 0.7, "expected_wins": 5.0, "expected_losses": 5.0,
+         "expected_wr": 0.5, "residual": 0.2},
+        {"archetype": "B", "games": 10, "observed_wins": 0, "observed_losses": 1,
+         "observed_wr": 0.0, "expected_wins": 5.0, "expected_losses": 5.0,
+         "expected_wr": 0.5, "residual": -0.5},
+    ])
+    with pytest.raises(AssertionError, match="zero-sum"):
+        _assert_zero_sum(summary)
