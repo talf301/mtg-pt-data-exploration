@@ -109,3 +109,80 @@ def render_csv(summary: pd.DataFrame, out_path: Path) -> None:
     out_path = Path(out_path)
     out_path.parent.mkdir(parents=True, exist_ok=True)
     summary.sort_values("residual", ascending=False).to_csv(out_path, index=False)
+
+
+import matplotlib
+
+matplotlib.use("Agg")  # no GUI
+import matplotlib.pyplot as plt
+
+
+def render_png(
+    summary: pd.DataFrame,
+    archetypes: list[str],
+    out_path: Path,
+) -> None:
+    """Paired horizontal bars (expected, observed) per archetype, sorted by residual desc.
+
+    Only renders archetypes in the provided list (typically top-10 + Other).
+    Reference line at 50%. Residual annotated at the right end of each pair.
+    Y-tick label shows archetype name with sample size: 'Izzet Prowess (n=719)'.
+    """
+    out_path = Path(out_path)
+    out_path.parent.mkdir(parents=True, exist_ok=True)
+
+    subset = summary[summary["archetype"].isin(archetypes)].copy()
+    subset = subset[subset["games"] > 0]  # skip empties
+    subset = subset.sort_values("residual", ascending=False).reset_index(drop=True)
+
+    n = len(subset)
+    if n == 0:
+        # Defensive: empty plot
+        fig, ax = plt.subplots(figsize=(8, 4))
+        ax.text(0.5, 0.5, "no data", ha="center", va="center", transform=ax.transAxes)
+        fig.savefig(out_path, dpi=150)
+        plt.close(fig)
+        return
+
+    fig, ax = plt.subplots(figsize=(10, max(4, 0.6 * n + 1)))
+
+    bar_h = 0.35
+    y = list(range(n))
+    expected = subset["expected_wr"].to_numpy()
+    observed = subset["observed_wr"].to_numpy()
+    residual = subset["residual"].to_numpy()
+
+    # Top bars: expected (lighter); bottom bars: observed (darker)
+    ax.barh([yi + bar_h / 2 for yi in y], expected, height=bar_h,
+            color="#a5b4d1", label="Expected (Elo)")
+    ax.barh([yi - bar_h / 2 for yi in y], observed, height=bar_h,
+            color="#3b5998", label="Observed")
+
+    # Reference line at 50%
+    ax.axvline(0.5, color="grey", linestyle="--", linewidth=0.8, alpha=0.6)
+
+    # Residual annotation at the right end of each archetype
+    x_text = max(expected.max(), observed.max()) + 0.03
+    for yi, r in zip(y, residual):
+        sign = "+" if r >= 0 else ""
+        color = "#1a7a1a" if r >= 0 else "#a01515"
+        ax.text(x_text, yi, f"{sign}{r * 100:.1f}%", va="center", color=color, fontsize=9, weight="bold")
+
+    # Y-axis labels: "archetype (n=games)"
+    labels = [f"{row.archetype} (n={int(row.games)})" for row in subset.itertuples()]
+    ax.set_yticks(y)
+    ax.set_yticklabels(labels)
+    ax.invert_yaxis()  # highest residual at top
+
+    ax.set_xlim(0, x_text + 0.08)
+    ax.set_xticks([0, 0.25, 0.5, 0.75, 1.0])
+    ax.set_xticklabels(["0%", "25%", "50%", "75%", "100%"])
+    ax.set_xlabel("Win rate")
+    ax.set_title("PT Secrets of Strixhaven — observed vs Elo-expected win rate")
+    ax.legend(loc="lower right", framealpha=0.9)
+    ax.spines["top"].set_visible(False)
+    ax.spines["right"].set_visible(False)
+
+    fig.tight_layout()
+    fig.savefig(out_path, dpi=150)
+    plt.close(fig)

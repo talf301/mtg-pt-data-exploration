@@ -208,3 +208,21 @@ def test_render_csv_preserves_all_columns(tmp_path: Path):
                      "observed_wr", "expected_wins", "expected_losses",
                      "expected_wr", "residual"]
     assert list(df.columns) == expected_cols
+
+
+from mtg_scrape.build_skill_adjusted import render_png
+
+
+def test_render_png_writes_a_non_empty_file(tmp_path: Path):
+    summary = pd.DataFrame([
+        {"archetype": "A", "games": 100, "observed_wins": 60, "observed_losses": 40,
+         "observed_wr": 0.60, "expected_wins": 55.0, "expected_losses": 45.0,
+         "expected_wr": 0.55, "residual": 0.05},
+        {"archetype": "B", "games": 100, "observed_wins": 40, "observed_losses": 60,
+         "observed_wr": 0.40, "expected_wins": 45.0, "expected_losses": 55.0,
+         "expected_wr": 0.45, "residual": -0.05},
+    ])
+    out_path = tmp_path / "archetype_skill_adjusted.png"
+    render_png(summary, archetypes=["A", "B"], out_path=out_path)
+    assert out_path.exists()
+    assert out_path.stat().st_size > 1000
